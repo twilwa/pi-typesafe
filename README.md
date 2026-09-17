@@ -180,9 +180,12 @@ Local budgets are 16,000 bytes for serialized tool input, 8,000 bytes for the
 latest user message, 12,000 bytes per target file, and 48,000 bytes for serialized
 state. Oversized inputs are skipped rather than silently truncated. Files must
 be regular, text, and resolve inside the Git repository; external symlink targets
-are identified but not read. Missing files are represented as absent. No Git
-root means abstention. Snapshot/advisory maps hold at most 128 tool calls and are
-cleared on session lifecycle changes. Missing/mismatched snapshots skip critique.
+are identified but not read. Missing-path resolution follows dangling symlinks,
+including relative targets, chains, and symlinked parents, before classifying a
+new destination. It has a local cap of 256 component steps; resolution errors
+abstain. Missing files are represented as absent. No Git root means abstention.
+Snapshot/advisory maps hold at most 128 tool calls and are cleared on session
+lifecycle changes. Missing/mismatched snapshots skip critique.
 
 This is a coding aid, not a security boundary. Tool input or source can itself
 contain credentials; a credential question does not redact them before upload.

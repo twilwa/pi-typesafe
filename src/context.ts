@@ -1,11 +1,12 @@
 import { execFile } from "node:child_process";
 import { constants } from "node:fs";
-import { open, realpath } from "node:fs/promises";
+import { lstat, open, readlink, realpath } from "node:fs/promises";
 import { homedir } from "node:os";
 import {
-  basename,
   dirname,
   isAbsolute,
+  join,
+  parse,
   relative,
   resolve,
   sep,
@@ -67,6 +68,43 @@ function inside(root: string, path: string): boolean {
   return rel !== ".." && !rel.startsWith(`..${sep}`) && !isAbsolute(rel);
 }
 
+/** Resolve symlinks even when their final target does not yet exist. */
+async function resolveMissingPath(absolutePath: string): Promise<string> {
+  let current = parse(absolutePath).root;
+  let pending = absolutePath.slice(current.length).split(sep);
+  let steps = 0;
+  while (pending.length > 0) {
+    // Local work budget, not a claim about platform symlink limits.
+    if (++steps > 256) throw new Error("Path resolution exceeds local budget");
+    const part = pending.shift()!;
+    if (!part || part === ".") continue;
+    if (part === "..") {
+      current = dirname(current);
+      continue;
+    }
+    const candidate = join(current, part);
+    let stat;
+    try {
+      stat = await lstat(candidate);
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+      current = candidate;
+      continue;
+    }
+    if (stat.isSymbolicLink()) {
+      const target = await readlink(candidate);
+      const targetRoot = parse(target).root;
+      if (targetRoot) current = targetRoot;
+      // Relative targets start at the link's actual parent. Resolve target
+      // components before later '..' components, as the filesystem does.
+      pending = [...target.slice(targetRoot.length).split(sep), ...pending];
+    } else {
+      current = candidate;
+    }
+  }
+  return current;
+}
+
 /** No recursive scans; only a small regular target file inside the repository. */
 export async function fileContext(cwd: string, root: string, path: string) {
   let normalized = path
@@ -81,30 +119,15 @@ export async function fileContext(cwd: string, root: string, path: string) {
     resolvedPath = await realpath(absolutePath);
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === "ENOENT") {
-      // A new file can still escape through an existing parent symlink.
-      let ancestor = dirname(absolutePath);
-      const suffix = [basename(absolutePath)];
-      while (true) {
-        try {
-          const resolvedPath = resolve(await realpath(ancestor), ...suffix);
-          return {
-            absolutePath,
-            resolvedPath,
-            status: inside(root, resolvedPath)
-              ? "absent"
-              : "outside repository; not read",
-            text: null,
-          };
-        } catch (ancestorError) {
-          if (
-            (ancestorError as NodeJS.ErrnoException).code !== "ENOENT" ||
-            dirname(ancestor) === ancestor
-          )
-            throw ancestorError;
-          suffix.unshift(basename(ancestor));
-          ancestor = dirname(ancestor);
-        }
-      }
+      const resolvedPath = await resolveMissingPath(absolutePath);
+      return {
+        absolutePath,
+        resolvedPath,
+        status: inside(root, resolvedPath)
+          ? "absent"
+          : "outside repository; not read",
+        text: null,
+      };
     }
     throw error;
   }

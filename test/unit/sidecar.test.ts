@@ -705,3 +705,29 @@ test("reverse-order parallel results retain each tool call's own before/after co
   assert.equal(states[1]?.before?.text, "// one before");
   assert.equal(states[1]?.after?.text, "// one after");
 });
+
+test("blocking boundary judge receives the external destination of a dangling symlink", async () => {
+  const target = `${root}-outside.ts`;
+  await symlink(target, resolve(root, "dangling-out"));
+  let calls = 0;
+  const sidecar = createSidecar({
+    env: { TYPESAFE_API_KEY: "mock", PI_JEV_CONFIG: '{"mode":"blocking"}' },
+    fetch: async (_url, init) => {
+      calls++;
+      const request = JSON.parse(String(init?.body));
+      assert.equal(request.state.before.resolvedPath, target);
+      assert.equal(request.state.before.status, "outside repository; not read");
+      return Response.json(
+        response(request.questions, { outsideRepository: hazard(0.99) }),
+      );
+    },
+  });
+  const event: WriteToolCallEvent = {
+    ...write,
+    input: { path: "dangling-out", content: "// new" },
+  };
+  const verdict = await sidecar.toolCall(event, ctx);
+  assert.equal(calls, 1);
+  assert.equal(verdict?.block, true);
+  assert.match(verdict?.reason ?? "", /Repository boundary/);
+});
