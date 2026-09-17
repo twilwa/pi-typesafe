@@ -1,0 +1,31 @@
+{
+  "name": "pi-typesafe",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Research-agnostic baseline for Pi extensions using TypeSafe System One",
+  "engines": {
+    "node": ">=24"
+  },
+  "scripts": {
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
+    "lint": "eslint .",
+    "typecheck": "tsc --noEmit",
+    "test": "node --test test/unit/*.test.ts test/integration/*.test.ts",
+    "test:unit": "node --test test/unit/*.test.ts",
+    "test:integration": "node --env-file-if-exists=.env --test test/integration/*.test.ts",
+    "check": "npm run format:check && npm run lint && npm run typecheck && npm test"
+  },
+  "dependencies": {
+    "@typesafe-ai/sdk": "0.6.0"
+  },
+  "devDependencies": {
+    "@eslint/js": "10.0.1",
+    "@types/node": "24.13.5",
+    "eslint": "10.10.0",
+    "prettier": "3.9.7",
+    "typescript": "6.0.3",
+    "typescript-eslint": "8.70.0"
+  }
+}
