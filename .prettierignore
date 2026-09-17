@@ -2,3 +2,6 @@ node_modules/
 dist/
 coverage/
 package-lock.json
+
+# Keep the canonical agent-memory import byte-identical.
+CLAUDE.md
