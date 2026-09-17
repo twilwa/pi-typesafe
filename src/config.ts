@@ -40,7 +40,7 @@ export function readConfig(env: NodeJS.ProcessEnv): SidecarConfig {
     )
   )
     throw new Error("Invalid sidecar configuration");
-  const mode = raw.mode === undefined ? "shadow" : raw.mode;
+  const mode = raw.mode === undefined ? "advisory" : raw.mode;
   if (mode !== "shadow" && mode !== "advisory" && mode !== "blocking")
     throw new Error("Invalid mode");
   const model =

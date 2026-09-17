@@ -5,8 +5,10 @@ and `edit`, and four diff-quality checks after successful `write` and `edit`.
 Questions share one TypeSafe System One request per phase. Jev returns typed
 values; this extension applies thresholds and writes fixed feedback text.
 
-**Shadow mode is the default.** It records assessments without blocking tools or
-changing model-visible results. Advisory and blocking modes use the same checks.
+**Advisory mode is the default.** It records assessments and appends qualifying
+feedback after execution without blocking tools. Blocking requires explicit
+opt-in; explicit shadow mode records assessments without changing model-visible
+results. All three modes use the same checks.
 Missing credentials or any judge failure always leaves the tool untouched.
 
 ## Try it
@@ -48,11 +50,12 @@ git init
 pi -e "$sidecar/src/extension.ts"
 ```
 
-Ask Pi to implement a small function and a test, then inspect the session's
-`jev-assessment` custom entries. For feedback the model can read, use:
+Ask Pi to implement a small function and a test. Qualifying feedback appears in
+tool results, and assessments are recorded in the session's `jev-assessment`
+custom entries. To record assessments without model-visible feedback, use:
 
 ```sh
-PI_JEV_CONFIG='{"mode":"advisory"}' pi -e "$sidecar/src/extension.ts"
+PI_JEV_CONFIG='{"mode":"shadow"}' pi -e "$sidecar/src/extension.ts"
 ```
 
 Pi still needs its normal coding-model credentials for an interactive task.
@@ -66,7 +69,7 @@ Set `PI_JEV_CONFIG` to a JSON object. Omitted fields use these defaults:
 
 | Field                         | Default                                       | Meaning                                                                         |
 | ----------------------------- | --------------------------------------------- | ------------------------------------------------------------------------------- |
-| `mode`                        | `"shadow"`                                    | Evaluate and record, with no agent-visible changes                              |
+| `mode`                        | `"advisory"`                                  | Evaluate, record, and append qualifying feedback after execution                |
 | `model`                       | `TYPESAFE_DEFAULT_MODEL`, then `"jev-latest"` | Model requested from TypeSafe                                                   |
 | `timeoutMs`                   | `750`                                         | Total budget per handler, including context collection; allowed range 1–5000 ms |
 | `checks.<id>.enabled`         | `true`                                        | Include this question in its batch                                              |

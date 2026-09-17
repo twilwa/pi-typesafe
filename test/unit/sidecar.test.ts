@@ -457,10 +457,10 @@ test("default Pi factory registers both handlers and session cleanup", () => {
   ]);
 });
 
-test("shadow is the default: records returned model and verdicts but leaves both hooks untouched", async () => {
+test("explicit shadow mode records returned model and verdicts but leaves both hooks untouched", async () => {
   const audits: unknown[] = [];
   const sidecar = createSidecar({
-    env: { TYPESAFE_API_KEY: "mock" },
+    env: { TYPESAFE_API_KEY: "mock", PI_JEV_CONFIG: '{"mode":"shadow"}' },
     record: (entry) => audits.push(entry),
     fetch: async (_url, init) => {
       const request = JSON.parse(String(init?.body));
@@ -485,6 +485,50 @@ test("shadow is the default: records returned model and verdicts but leaves both
     JSON.stringify(audits),
     /mock-key|answer\.ts|export const|Implement the answer/,
   );
+});
+
+test("no configured mode defaults to advisory for both hazards and rubric feedback", async () => {
+  for (const config of [undefined, '{"timeoutMs":750}']) {
+    const audits: unknown[] = [];
+    const env = {
+      TYPESAFE_API_KEY: "mock",
+      ...(config === undefined ? {} : { PI_JEV_CONFIG: config }),
+    };
+    assert.equal(readConfig(env).mode, "advisory");
+    const sidecar = createSidecar({
+      env,
+      record: (entry) => audits.push(entry),
+      fetch: async (_url, init) => {
+        const request = JSON.parse(String(init?.body));
+        return Response.json(
+          response(request.questions, {
+            destructive: hazard(0.99),
+            implementation: low,
+          }),
+        );
+      },
+    });
+    const originalCall: WriteToolCallEvent = structuredClone(write);
+    const originalResult: ToolResultEvent = structuredClone(result);
+    await prepare(sidecar); // A qualifying hazard must not block the write.
+    assert.deepEqual(write, originalCall);
+    const patch = await sidecar.toolResult(result, ctx);
+    assert.deepEqual(Object.keys(patch ?? {}), ["content"]);
+    assert.deepEqual(
+      patch?.content.slice(0, result.content.length),
+      result.content,
+    );
+    const critique = JSON.stringify(patch?.content.at(-1));
+    assert.match(critique, /destructive/);
+    assert.match(critique, /implementation/);
+    assert.deepEqual(result, originalResult);
+    assert.equal(audits.length, 2);
+    assert.ok(
+      audits.every(
+        (entry) => (entry as Record<string, unknown>).mode === "advisory",
+      ),
+    );
+  }
 });
 
 test("advisory guard never blocks and adds its warning only to the matching tool result", async () => {
