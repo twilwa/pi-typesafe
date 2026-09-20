@@ -30,6 +30,16 @@ export function inRange(
   );
 }
 
+/** API keys may only be sent to TLS-protected configured endpoints. */
+export function configuredBaseURL(env: NodeJS.ProcessEnv): string | undefined {
+  const value = env.TYPESAFE_BASE_URL;
+  if (value === undefined) return undefined;
+  const url = new URL(value);
+  if (url.protocol !== "https:")
+    throw new Error("TYPESAFE_BASE_URL must use HTTPS");
+  return value;
+}
+
 /** Invalid configuration disables judging, rather than guessing at a policy. */
 export function readConfig(env: NodeJS.ProcessEnv): SidecarConfig {
   const raw: unknown = JSON.parse(env.PI_JEV_CONFIG || "{}");

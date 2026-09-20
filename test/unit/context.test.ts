@@ -1,9 +1,17 @@
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { mkdir, mkdtemp, rm, symlink } from "node:fs/promises";
+import {
+  mkdir,
+  mkdtemp,
+  readFile,
+  rm,
+  symlink,
+  writeFile,
+} from "node:fs/promises";
 import { resolve } from "node:path";
+import { setTimeout as delay } from "node:timers/promises";
 import { test } from "node:test";
-import { fileContext } from "../../src/context.ts";
+import { fileContext, repositoryContext } from "../../src/context.ts";
 
 test("dangling symlink to an external new file is classified outside the repository", async (t) => {
   const fixture = await mkdtemp(resolve(".jev-context-"));
@@ -86,4 +94,44 @@ test("symlink loops fail context collection instead of being classified as absen
   await symlink("second", resolve(repo, "first"));
   await symlink("first", resolve(repo, "second"));
   await assert.rejects(fileContext(repo, repo, "first"), { code: "ELOOP" });
+});
+
+test("repository discovery escalates cancellation and resolves only after the Git child is reaped", async (t) => {
+  const fixture = await mkdtemp(resolve(".jev-git-child-"));
+  t.after(() => rm(fixture, { recursive: true, force: true }));
+  const wrapper = resolve(fixture, "git");
+  const pidFile = resolve(fixture, "pid");
+  await writeFile(
+    wrapper,
+    `#!${process.execPath}\nimport fs from "node:fs";\nprocess.on("SIGTERM", () => {});\nfs.writeFileSync(${JSON.stringify(pidFile)}, String(process.pid));\nsetInterval(() => {}, 1000);\n`,
+    { mode: 0o755 },
+  );
+  const previousPath = process.env.PATH;
+  process.env.PATH = `${fixture}:${previousPath ?? ""}`;
+  const controller = new AbortController();
+  let pid: number | undefined;
+  try {
+    const pending = repositoryContext(fixture, controller.signal);
+    for (let attempt = 0; attempt < 100; attempt++) {
+      try {
+        pid = Number(await readFile(pidFile, "utf8"));
+        break;
+      } catch {
+        await delay(5);
+      }
+    }
+    assert.ok(pid);
+    controller.abort();
+    await assert.rejects(pending, { name: "AbortError" });
+    assert.throws(() => process.kill(pid!, 0), { code: "ESRCH" });
+  } finally {
+    process.env.PATH = previousPath;
+    if (pid) {
+      try {
+        process.kill(pid, "SIGKILL");
+      } catch {
+        /* Already reaped as expected. */
+      }
+    }
+  }
 });

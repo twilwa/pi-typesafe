@@ -10,11 +10,11 @@ import {
 } from "@earendil-works/pi-coding-agent";
 import type { AuditEntry } from "./audit.ts";
 import { guardChecks, criticChecks, type CheckId } from "./checks.ts";
-import { readConfig } from "./config.ts";
+import { configuredBaseURL, readConfig } from "./config.ts";
 import {
   boundedJson,
   fileContext,
-  repository,
+  repositoryContext,
   task,
   MAX_INPUT_BYTES,
   type JudgeContext,
@@ -36,11 +36,20 @@ export interface SidecarOptions {
 
 type Snapshot = {
   repository: string;
+  metadataPaths: string[];
   task: string;
   before: Awaited<ReturnType<typeof fileContext>>;
   path: string;
   cwd: string;
 };
+
+type ToolCallOutcome = {
+  snapshot?: Snapshot;
+  advisory?: string[];
+  result?: ToolCallEventResult;
+};
+
+const CANCELLATION_SETTLE_MS = 60;
 
 export function createSidecar(options: SidecarOptions = {}) {
   const env = options.env ?? process.env;
@@ -62,7 +71,7 @@ export function createSidecar(options: SidecarOptions = {}) {
     if (apiKey)
       client = createTypeSafe({
         apiKey,
-        baseURL: env.TYPESAFE_BASE_URL,
+        baseURL: configuredBaseURL(env),
         defaultModel: config.model,
         fetch: options.fetch,
         timeout: config.timeoutMs,
@@ -87,10 +96,18 @@ export function createSidecar(options: SidecarOptions = {}) {
       ? AbortSignal.any([controller.signal, ctx.signal])
       : controller.signal;
     let timer: ReturnType<typeof setTimeout> | undefined;
+    let cancellationTimer: ReturnType<typeof setTimeout> | undefined;
     let onAbort: (() => void) | undefined;
     try {
       const deadline = new Promise<never>((_, reject) => {
-        onAbort = () => reject(new Error("Judge cancelled"));
+        // Give abort-aware work a short bounded window to release resources.
+        // Uninterruptible kernel I/O can still outlive this best-effort wait.
+        onAbort = () => {
+          cancellationTimer = setTimeout(
+            () => reject(new Error("Judge cancelled")),
+            CANCELLATION_SETTLE_MS,
+          );
+        };
         signal.addEventListener("abort", onAbort, { once: true });
         timer = setTimeout(() => controller.abort(), config.timeoutMs);
       });
@@ -104,6 +121,7 @@ export function createSidecar(options: SidecarOptions = {}) {
       return undefined;
     } finally {
       clearTimeout(timer);
+      clearTimeout(cancellationTimer);
       if (onAbort) signal.removeEventListener("abort", onAbort);
       controller.abort();
       active.delete(controller);
@@ -173,39 +191,44 @@ export function createSidecar(options: SidecarOptions = {}) {
     event: ToolCallEvent,
     ctx: JudgeContext,
   ): Promise<ToolCallEventResult | undefined> {
-    return safely(ctx, async (signal) => {
+    const outcome = await safely<ToolCallOutcome>(ctx, async (signal) => {
       if (
         !isToolCallEventType("bash", event) &&
         !isToolCallEventType("edit", event) &&
         !isToolCallEventType("write", event)
       )
-        return;
+        return {};
       const questions = questionsFor(guardChecks);
       const needsSnapshot =
         event.toolName !== "bash" &&
         Object.keys(questionsFor(criticChecks)).length > 0;
-      if (!needsSnapshot && Object.keys(questions).length === 0) return;
+      if (!needsSnapshot && Object.keys(questions).length === 0) return {};
       boundedJson(event.input, MAX_INPUT_BYTES);
-      const root = await repository(ctx.cwd, signal);
+      const repository = await repositoryContext(ctx.cwd, signal);
+      const root = repository.root;
       const statedTask = task(ctx);
       let before: Snapshot["before"] | undefined;
+      let snapshot: Snapshot | undefined;
       if (event.toolName !== "bash") {
-        before = await fileContext(ctx.cwd, root, event.input.path);
+        before = await fileContext(
+          ctx.cwd,
+          root,
+          event.input.path,
+          repository.metadataPaths,
+        );
         signal.throwIfAborted();
         if (needsSnapshot) {
-          // Bounded memory even if another extension blocks and no result follows.
-          if (snapshots.size >= 128)
-            snapshots.delete(snapshots.keys().next().value!);
-          snapshots.set(event.toolCallId, {
+          snapshot = {
             repository: root,
+            metadataPaths: repository.metadataPaths,
             task: statedTask,
             before,
             path: event.input.path,
             cwd: ctx.cwd,
-          });
+          };
         }
       }
-      if (Object.keys(questions).length === 0) return;
+      if (Object.keys(questions).length === 0) return { snapshot };
       const answers = await judge(
         {
           repository: root,
@@ -228,21 +251,34 @@ export function createSidecar(options: SidecarOptions = {}) {
         );
       });
       if (hazards.length > 0 && config!.mode === "advisory") {
-        if (advisories.size >= 128)
-          advisories.delete(advisories.keys().next().value!);
-        advisories.set(
-          event.toolCallId,
-          hazards.map(([id, check]) => `- ${id}: ${check.feedback}`),
-        );
-      }
-      if (hazards.length > 0 && config!.mode === "blocking") {
-        snapshots.delete(event.toolCallId);
         return {
-          block: true,
-          reason: `Jev pre-flight: ${hazards.map(([, check]) => check.feedback).join(" ")}`,
+          snapshot,
+          advisory: hazards.map(([id, check]) => `- ${id}: ${check.feedback}`),
         };
       }
+      if (hazards.length > 0 && config!.mode === "blocking") {
+        return {
+          result: {
+            block: true,
+            reason: `Jev pre-flight: ${hazards.map(([, check]) => check.feedback).join(" ")}`,
+          },
+        };
+      }
+      return { snapshot };
     });
+    if (!outcome) return undefined;
+    if (outcome.snapshot) {
+      // Commit only after safely accepted deadline and cancellation checks.
+      if (snapshots.size >= 128)
+        snapshots.delete(snapshots.keys().next().value!);
+      snapshots.set(event.toolCallId, outcome.snapshot);
+    }
+    if (outcome.advisory) {
+      if (advisories.size >= 128)
+        advisories.delete(advisories.keys().next().value!);
+      advisories.set(event.toolCallId, outcome.advisory);
+    }
+    return outcome.result;
   }
 
   async function toolResult(
@@ -269,6 +305,7 @@ export function createSidecar(options: SidecarOptions = {}) {
           ctx.cwd,
           snapshot.repository,
           snapshot.path,
+          snapshot.metadataPaths,
         );
         const answers = await judge(
           {
