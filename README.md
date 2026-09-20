@@ -108,7 +108,8 @@ phase by disabling its four checks; with all eight disabled, no context is read
 and no API request is made. Unknown fields/checks, invalid JSON, invalid modes,
 and out-of-range values disable the judge instead of guessing a policy.
 `confidence` must be 0–1 and `minScore` must be 0–2. `TYPESAFE_BASE_URL` overrides
-the default `https://api.typesafe.ai`; the API key is sent to that endpoint.
+the default `https://api.typesafe.ai` only when it is a valid HTTPS URL; HTTP is
+refused without a loopback exception because the API key is sent to that endpoint.
 
 ## Checks
 
@@ -147,13 +148,22 @@ cancellation return `undefined`. A failure while recording an assessment or
 logging also cannot block execution. The complete asynchronous judging path is
 caught because Pi treats an uncaught `tool_call` error as a tool refusal.
 
-Each handler races its work against a 750 ms deadline, propagates `ctx.signal`,
-and disables SDK retries. A fetch that ignores abort cannot hold up the hook;
-normal abort-aware transports are cancelled. Session shutdown/reload cancels
-outstanding work and clears snapshots. Each pre-flight and critic has its own
-budget: a write may cost two requests, and Pi preflights sibling tools
-sequentially. These costs accumulate; this is not a zero-overhead service.
-JavaScript scheduling can overshoot timer deadlines under host load.
+Each handler uses a 750 ms best-effort budget, propagates `ctx.signal`, and
+disables SDK retries. A fetch that ignores abort is released after a short
+cancellation-settlement window; normal abort-aware transports are cancelled.
+Repository discovery explicitly sends SIGTERM, escalates to SIGKILL after a
+bounded grace period, and waits for the child exit when the operating system can
+deliver those signals. It cannot force termination of a process stuck in
+uninterruptible kernel I/O. Session shutdown/reload cancels outstanding work and
+clears snapshots. Each pre-flight and critic has its own budget: a write may cost
+two requests, and Pi preflights sibling tools sequentially. These costs
+accumulate; this is not a zero-overhead service. Synchronous work such as Pi's
+assessment persistence and JavaScript scheduling under host load can overrun the
+configured time; state and advisories are committed only if the final deadline
+and cancellation checks accept the handler.
+
+Incoming provider responses are stream-limited to 64 KiB before SDK parsing.
+The exact limit is accepted; an over-limit response fails open.
 
 Failures are quiet by default. `NODE_DEBUG=pi-jev` enables fixed debug messages
 without keys, prompts, source, SDK bodies, or raw error text. SDK logging is
@@ -177,24 +187,32 @@ supplies surrounding style. The extension does not scan the repository or read
 environment variables for task context.
 
 Local budgets are 16,000 bytes for serialized tool input, 8,000 bytes for the
-latest user message, 12,000 bytes per target file, and 48,000 bytes for serialized
-state. Oversized inputs are skipped rather than silently truncated. Files must
-be regular, text, and resolve inside the Git repository; external symlink targets
-are identified but not read. Missing-path resolution follows dangling symlinks,
+latest user message, 12,000 bytes per target file, 48,000 bytes for serialized
+state, and 64 KiB for the provider response. Oversized inputs are skipped rather
+than silently truncated. Files must be regular, text, and resolve inside the Git
+repository. Git's discovered metadata paths, including the worktree `.git`
+marker, Git directory, common directory, and aliases resolving into them, are
+classified but never read. Missing-path resolution follows dangling symlinks,
 including relative targets, chains, and symlinked parents, before classifying a
 new destination. It has a local cap of 256 component steps; resolution errors
 abstain. Missing files are represented as absent. No Git root means abstention.
 Snapshot/advisory maps hold at most 128 tool calls and are cleared on session
 lifecycle changes. Missing/mismatched snapshots skip critique.
 
-This is a coding aid, not a security boundary. Tool input or source can itself
-contain credentials; a credential question does not redact them before upload.
-Only use a key with source/tasks approved for that endpoint. Shell indirection,
-missing context, prompt injection, later input-mutating extensions, and concurrent
-writes to the same file can invalidate a judgment. The task context is the latest
-user message, not a reconstruction of all prior authorizations. `user_bash`,
-PowerShell, custom tools, and other extensions' direct actions are outside this
-first implementation. Failed writes/edits receive no rubric critique.
+This is a path-based model assessment, not deterministic containment or a
+security boundary. Tool input or source can itself contain credentials; a
+credential question does not redact them before upload. Only use a key with
+source/tasks approved for that endpoint. An ancestor can be replaced between
+path assessment and reading, and hardlinks or bind mounts can alias storage that
+originated elsewhere. Those cases require an execution/read boundary anchored to
+directory handles or equivalent platform containment and are not solved here.
+Pi's edit diff can also contain context supplied by the tool result even when this
+extension did not read an external snapshot. Shell indirection, missing context,
+prompt injection, later input-mutating extensions, and concurrent writes to the
+same file can invalidate a judgment. The task context is the latest user message,
+not a reconstruction of all prior authorizations. `user_bash`, PowerShell, custom
+tools, and other extensions' direct actions are outside this first implementation.
+Failed writes/edits receive no rubric critique.
 
 Valid assessments are saved with `pi.appendEntry("jev-assessment", ...)`, outside
 model context. Entries contain the returned model, request ID when available,
@@ -220,7 +238,8 @@ npm run smoke:jev         # optional live six-batch synthetic sidecar trial
 when its key is absent. No existing test was weakened. Unit coverage includes
 blocking/confidence boundaries, batched question shapes, all three modes,
 content preservation, failures, malformed fields, missing keys, cancellation,
-non-cooperative transport timeouts, context limits, and snapshot cleanup.
+non-cooperative transport timeouts, Git-child reaping, response-size boundaries,
+Git-metadata exclusion, context limits, and snapshot cleanup.
 
 Measured on this host on **2026-09-17**, using `npm run smoke:jev`, Node 24.21.0,
 the default 750 ms budget, and a tiny synthetic function replacement:

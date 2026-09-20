@@ -304,9 +304,50 @@ test("transport exceptions, HTTP failures and malformed responses fail open with
     });
     await prepare(sidecar);
     assert.equal(await sidecar.toolResult(result, ctx), undefined);
-    assert.equal(calls, 2);
-    assert.equal(logs.length, 2);
+    assert.equal(calls, 1);
+    assert.equal(logs.length, 1);
     assert.ok(logs.every((line) => !line.includes("sensitive")));
+  }
+});
+
+test("a guard advisory rejected after blocking audit persistence never reaches the result", async () => {
+  const sidecar = createSidecar({
+    env: {
+      TYPESAFE_API_KEY: "mock",
+      PI_JEV_CONFIG: JSON.stringify({ timeoutMs: 20 }),
+    },
+    record: () => {
+      Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 80);
+    },
+    fetch: async (_url, init) => {
+      const request = JSON.parse(String(init?.body));
+      return Response.json(
+        response(request.questions, { destructive: hazard(0.99) }),
+      );
+    },
+  });
+  assert.equal(await sidecar.toolCall(bash, ctx), undefined);
+  const bashResult: ToolResultEvent = {
+    ...result,
+    toolName: "bash",
+    toolCallId: bash.toolCallId,
+    input: bash.input,
+  };
+  assert.equal(await sidecar.toolResult(bashResult, ctx), undefined);
+});
+
+test("configured base URL must use HTTPS, including loopback overrides", async () => {
+  for (const baseURL of ["http://example.test", "http://127.0.0.1:8080"]) {
+    let calls = 0;
+    const sidecar = createSidecar({
+      env: { TYPESAFE_API_KEY: "mock", TYPESAFE_BASE_URL: baseURL },
+      fetch: async () => {
+        calls++;
+        throw new Error("must not fetch");
+      },
+    });
+    assert.equal(await sidecar.toolCall(bash, ctx), undefined);
+    assert.equal(calls, 0);
   }
 });
 
@@ -422,6 +463,48 @@ test("uses actual git root from a subdirectory and never reads symlink targets o
   const state = requests[0]?.state as Record<string, unknown>;
   assert.equal(state.repository, root);
   assert.equal((state.before as Record<string, unknown>).text, null);
+});
+
+test("Git metadata contents are classified but never included in a request payload", async (t) => {
+  const repo = await mkdtemp(resolve(".jev-metadata-"));
+  t.after(() => rm(repo, { recursive: true, force: true }));
+  execFileSync("git", ["init", "-q", repo]);
+  const secret = "SYNTHETIC_GIT_CONFIG_CREDENTIAL";
+  execFileSync("git", ["config", "credential.helper", `store-${secret}`], {
+    cwd: repo,
+  });
+  await symlink(".git", resolve(repo, "git-metadata-alias"));
+  const localCtx = { ...ctx, cwd: repo };
+  const payloads: string[] = [];
+  const sidecar = createSidecar({
+    env: { TYPESAFE_API_KEY: "mock" },
+    fetch: async (_url, init) => {
+      const payload = String(init?.body);
+      payloads.push(payload);
+      const request = JSON.parse(payload);
+      assert.equal(
+        request.state.before.status,
+        "repository metadata; not read",
+      );
+      assert.equal(request.state.before.text, null);
+      return Response.json(response(request.questions));
+    },
+  });
+  for (const [index, path] of [
+    ".git/config",
+    "git-metadata-alias/config",
+    "nested/../.git/config",
+  ].entries())
+    await sidecar.toolCall(
+      {
+        ...write,
+        toolCallId: `metadata-${index}`,
+        input: { path, content: "replacement" },
+      },
+      localCtx,
+    );
+  assert.equal(payloads.length, 3);
+  assert.ok(payloads.every((payload) => !payload.includes(secret)));
 });
 
 test("configuration rejects unknown checks, invalid types, and out-of-range thresholds", () => {

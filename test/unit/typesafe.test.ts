@@ -6,6 +6,7 @@ import {
   score,
   noul,
   createTypeSafe,
+  MAX_RESPONSE_BYTES,
   type SystemOneResult,
 } from "../../src/typesafe.ts";
 
@@ -134,5 +135,33 @@ test("validates credentials only when explicitly creating a client", () => {
   } finally {
     if (previous === undefined) delete process.env.TYPESAFE_API_KEY;
     else process.env.TYPESAFE_API_KEY = previous;
+  }
+});
+
+test("accepts an exact-limit response and rejects a response one byte over", async () => {
+  const json = JSON.stringify(result);
+  assert.ok(Buffer.byteLength(json) < MAX_RESPONSE_BYTES);
+  const responseBody = (bytes: number) =>
+    json + " ".repeat(bytes - Buffer.byteLength(json));
+
+  for (const [bytes, accepted] of [
+    [MAX_RESPONSE_BYTES, true],
+    [MAX_RESPONSE_BYTES + 1, false],
+  ] as const) {
+    const client = createTypeSafe({
+      apiKey: "unit-test-key",
+      retry: { maxRetries: 0 },
+      fetch: async () =>
+        new Response(responseBody(bytes), {
+          headers: { "content-type": "application/json" },
+        }),
+    });
+    const request = client.systemOne({
+      state: null,
+      questions,
+      model: "test-model",
+    });
+    if (accepted) assert.deepEqual(await request, result);
+    else await assert.rejects(request, /response exceeds local budget/);
   }
 });

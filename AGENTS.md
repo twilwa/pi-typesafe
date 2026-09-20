@@ -6,6 +6,7 @@ This file is the project's committed home for project-intrinsic agent knowledge:
 - The Pi entry is `src/extension.ts`; question policy lives in `src/checks.ts`, failure/timeout handling in `src/sidecar.ts`, and runtime response checks in `src/verdict.ts`. Keep advisory mode the default and judge failures a quiet no-op.
 - Keep SDK request/response types authoritative; the thin boundary is `src/typesafe.ts`.
 - Offline development must work without credentials; keep live tests in `test/integration/` and skip them when the key is absent.
+- Treat the filesystem check as a path-based model assessment, not deterministic containment; `README.md` documents alias/race limits and best-effort timing.
 
 ## Maintaining this file
 

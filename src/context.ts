@@ -1,4 +1,4 @@
-import { execFile } from "node:child_process";
+import { spawn } from "node:child_process";
 import { constants } from "node:fs";
 import { lstat, open, readlink, realpath } from "node:fs/promises";
 import { homedir } from "node:os";
@@ -12,17 +12,22 @@ import {
   sep,
 } from "node:path";
 import { fileURLToPath } from "node:url";
-import { promisify } from "node:util";
 import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
 
-const run = promisify(execFile);
 export const MAX_STATE_BYTES = 48_000;
 export const MAX_INPUT_BYTES = 16_000;
 const MAX_FILE_BYTES = 12_000;
+const MAX_GIT_OUTPUT_BYTES = 4096;
+const GIT_TERMINATION_GRACE_MS = 40;
 export type JudgeContext = Pick<
   ExtensionContext,
   "cwd" | "signal" | "sessionManager"
 >;
+
+export interface RepositoryContext {
+  root: string;
+  metadataPaths: string[];
+}
 
 export function boundedJson(value: unknown, max = MAX_STATE_BYTES): string {
   const json = JSON.stringify(value);
@@ -31,16 +36,106 @@ export function boundedJson(value: unknown, max = MAX_STATE_BYTES): string {
   return json;
 }
 
+function runGitDiscovery(cwd: string, signal: AbortSignal): Promise<string> {
+  signal.throwIfAborted();
+  return new Promise((resolveResult, reject) => {
+    const child = spawn(
+      "git",
+      [
+        "rev-parse",
+        "--path-format=absolute",
+        "--show-toplevel",
+        "--git-dir",
+        "--git-common-dir",
+      ],
+      { cwd, stdio: ["ignore", "pipe", "pipe"] },
+    );
+    const stdout: Buffer[] = [];
+    let stdoutBytes = 0;
+    let failure: Error | undefined;
+    let escalation: ReturnType<typeof setTimeout> | undefined;
+    let terminating = false;
+
+    const terminate = () => {
+      if (terminating || child.exitCode !== null || child.signalCode !== null)
+        return;
+      terminating = true;
+      try {
+        child.kill("SIGTERM");
+      } catch {
+        /* The close/error path below remains authoritative. */
+      }
+      escalation = setTimeout(() => {
+        if (child.exitCode === null && child.signalCode === null) {
+          try {
+            child.kill("SIGKILL");
+          } catch {
+            /* Uninterruptible kernel I/O cannot be force-reaped here. */
+          }
+        }
+      }, GIT_TERMINATION_GRACE_MS);
+    };
+    const onAbort = () => terminate();
+
+    signal.addEventListener("abort", onAbort, { once: true });
+    child.stdout.on("data", (chunk: Buffer) => {
+      stdoutBytes += chunk.length;
+      if (stdoutBytes > MAX_GIT_OUTPUT_BYTES) {
+        failure = new Error("Git discovery output exceeds local budget");
+        terminate();
+      } else stdout.push(chunk);
+    });
+    // Drain stderr without retaining repository-specific diagnostics.
+    child.stderr.resume();
+    child.on("error", (error) => {
+      failure = error;
+    });
+    child.on("close", (code) => {
+      clearTimeout(escalation);
+      signal.removeEventListener("abort", onAbort);
+      // Waiting for close is the post-cancellation exit/reaping check.
+      if (signal.aborted)
+        reject(new DOMException("Git discovery cancelled", "AbortError"));
+      else if (failure) reject(failure);
+      else if (code !== 0) reject(new Error("Git repository discovery failed"));
+      else resolveResult(Buffer.concat(stdout).toString("utf8"));
+    });
+    if (signal.aborted) onAbort();
+  });
+}
+
+async function canonicalOrSelf(path: string): Promise<string> {
+  try {
+    return await realpath(path);
+  } catch {
+    return resolve(path);
+  }
+}
+
+export async function repositoryContext(
+  cwd: string,
+  signal: AbortSignal,
+): Promise<RepositoryContext> {
+  const lines = (await runGitDiscovery(cwd, signal)).trim().split(/\r?\n/);
+  if (lines.length !== 3 || lines.some((line) => !line))
+    throw new Error("Unexpected Git repository discovery result");
+  const root = await realpath(lines[0]!);
+  const marker = resolve(root, ".git");
+  const metadataPaths = await Promise.all([
+    canonicalOrSelf(marker),
+    canonicalOrSelf(lines[1]!),
+    canonicalOrSelf(lines[2]!),
+  ]);
+  signal.throwIfAborted();
+  return { root, metadataPaths: [...new Set([marker, ...metadataPaths])] };
+}
+
+/** Backward-compatible root-only discovery for direct callers. */
 export async function repository(
   cwd: string,
   signal: AbortSignal,
 ): Promise<string> {
-  const result = await run("git", ["rev-parse", "--show-toplevel"], {
-    cwd,
-    signal,
-    maxBuffer: 4096,
-  });
-  return realpath(result.stdout.trim());
+  return (await repositoryContext(cwd, signal)).root;
 }
 
 export function task(ctx: JudgeContext): string {
@@ -66,6 +161,14 @@ export function task(ctx: JudgeContext): string {
 function inside(root: string, path: string): boolean {
   const rel = relative(root, path);
   return rel !== ".." && !rel.startsWith(`..${sep}`) && !isAbsolute(rel);
+}
+
+function insideOrEqual(root: string, path: string): boolean {
+  return path === root || inside(root, path);
+}
+
+function isRepositoryMetadata(path: string, metadataPaths: readonly string[]) {
+  return metadataPaths.some((metadata) => insideOrEqual(metadata, path));
 }
 
 /** Resolve symlinks even when their final target does not yet exist. */
@@ -106,7 +209,12 @@ async function resolveMissingPath(absolutePath: string): Promise<string> {
 }
 
 /** No recursive scans; only a small regular target file inside the repository. */
-export async function fileContext(cwd: string, root: string, path: string) {
+export async function fileContext(
+  cwd: string,
+  root: string,
+  path: string,
+  metadataPaths: readonly string[] = [],
+) {
   let normalized = path
     .replace(/^@/, "")
     .replace(/[\u00A0\u2000-\u200A\u202F\u205F\u3000]/g, " ");
@@ -123,9 +231,11 @@ export async function fileContext(cwd: string, root: string, path: string) {
       return {
         absolutePath,
         resolvedPath,
-        status: inside(root, resolvedPath)
-          ? "absent"
-          : "outside repository; not read",
+        status: isRepositoryMetadata(resolvedPath, metadataPaths)
+          ? "repository metadata; not read"
+          : inside(root, resolvedPath)
+            ? "absent"
+            : "outside repository; not read",
         text: null,
       };
     }
@@ -136,6 +246,13 @@ export async function fileContext(cwd: string, root: string, path: string) {
       absolutePath,
       resolvedPath,
       status: "outside repository; not read",
+      text: null,
+    };
+  if (isRepositoryMetadata(resolvedPath, metadataPaths))
+    return {
+      absolutePath,
+      resolvedPath,
+      status: "repository metadata; not read",
       text: null,
     };
   const file = await open(
