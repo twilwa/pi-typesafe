@@ -5,3 +5,6 @@ package-lock.json
 
 # Keep the canonical agent-memory import byte-identical.
 CLAUDE.md
+
+# Local agent session state, never part of the project source.
+.claude/
