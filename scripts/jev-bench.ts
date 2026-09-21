@@ -15,11 +15,12 @@
  */
 import { readFileSync } from "node:fs";
 import { TypeSafeClient, type JsonValue } from "@typesafe-ai/sdk";
+import { pinnedModel } from "./jev-pinned-model.ts";
 
 const LABELS =
   process.argv[2] ?? "test/fixtures/jev-lint/name-matches-body.jsonl";
 const THRESHOLD = 0.8;
-const MODEL = process.env.JEV_MODEL ?? "jev-latest";
+const MODEL = process.env.JEV_MODEL ?? pinnedModel();
 
 interface Label {
   id: string;

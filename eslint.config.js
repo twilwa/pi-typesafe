@@ -6,6 +6,9 @@ export default tseslint.config(
   {
     ignores: [
       "node_modules/",
+      // Deliberately bad code: the jev fixtures exist to trip rules on demand
+      // under their own configs, so the deterministic lint must leave them be.
+      "test/fixtures/jev-lint/",
       "coverage/",
       "dist/",
       "package-lock.json",

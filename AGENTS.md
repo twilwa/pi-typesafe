@@ -21,6 +21,11 @@ This file is the project's committed home for project-intrinsic agent knowledge:
   `test/unit/jev-lint.test.ts` holds it to that. Functions skipped for the per-file deadline or a
   rate limit are not reported by the plugin at all, so a semantic run is evidence only about the
   functions it actually judged.
+- The wrapper classifies every run and never calls an unjudged one clean. It prints **INCONCLUSIVE**
+  when the plugin says it is unavailable, when ESLint exits 2+, and when ESLint exits 1 with no
+  `jev/` output at all — that last case is indistinguishable from a silent plugin failure
+  (`strict: false`, a per-unit timeout, a rate limit), so it is reported as no evidence rather than
+  as a pass.
 - **What the API sees:** one function at a time — name, signature, leading comment and body — with
   no file path, imports, or neighbouring code. It therefore cannot prove cross-function
   architecture or correctness, only whether a name, comment and body agree with each other.
