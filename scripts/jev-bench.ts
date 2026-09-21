@@ -1,16 +1,23 @@
 /**
- * Replay the seeded `name-matches-body` benchmark against the live Jev model.
+ * Replay a labelled `name-matches-body` set against the live Jev model.
  *
- * Ten labelled cases, one System One request each, so a run costs exactly ten
- * API calls. It reports accuracy at the configured threshold and prints the
- * resolved model id, which is the id pinned in `eslint.semantic.config.js`.
+ * One System One request per case, so a run costs exactly as many API calls as
+ * the labels file has lines. It reports accuracy at the configured threshold
+ * and prints the resolved model id, which is the id pinned in
+ * `eslint.semantic.config.js`.
  *
- * Usage: set -a; . ~/.config/typesafe/env; set +a; node scripts/jev-bench.ts
+ * Usage: set -a; . ~/.config/typesafe/env; set +a
+ *        node scripts/jev-bench.ts [labels.jsonl]
+ *
+ * Defaults to the 10-case seed benchmark. Pass
+ * `test/fixtures/jev-lint/observed-exceptions.jsonl` to re-check the
+ * true negatives observed in this repository against a threshold change.
  */
 import { readFileSync } from "node:fs";
 import { TypeSafeClient, type JsonValue } from "@typesafe-ai/sdk";
 
-const LABELS = "test/fixtures/jev-lint/name-matches-body.jsonl";
+const LABELS =
+  process.argv[2] ?? "test/fixtures/jev-lint/name-matches-body.jsonl";
 const THRESHOLD = 0.8;
 const MODEL = process.env.JEV_MODEL ?? "jev-latest";
 
