@@ -225,6 +225,43 @@ tool messages. To inspect assessments in a session JSONL file:
 jq 'select(.type == "custom" and .customType == "jev-assessment") | .data' SESSION.jsonl
 ```
 
+## Semantic lint (optional, advisory)
+
+`npm run lint:semantic` runs `eslint-plugin-jev`, which asks the TypeSafe Jev
+model plain-English questions about each function. It is deliberately separate
+from `npm run check`: the authoritative gate stays deterministic, offline and
+credential-free.
+
+```sh
+set -a; . ~/.config/typesafe/env; set +a   # never commit the key
+npm run lint:semantic
+npm run bench:jev                          # replay the 10-case seed benchmark
+```
+
+**What the API receives.** One function at a time: its **name, signature,
+leading comment and body** — plus an index of the static `throw` messages
+already contained in that body. No file path, no imports, no surrounding or
+calling code. Verified by reading the published package, not just its README;
+see `docs/jev-lint/package-review.md`.
+
+**What it therefore cannot do.** Because each function is judged alone, the
+check **cannot prove cross-function architecture or correctness**. It cannot
+tell whether two modules agree on a contract, whether a call graph is sound, or
+whether a function meets a specification it was never shown. It judges only
+whether a name, a comment and a body agree with one another, and returns a
+probability. Deterministic lint, typecheck and tests remain authoritative;
+nothing gates on a judgement.
+
+**With no key the rules report themselves inactive and nothing is judged** —
+a skipped result, never a clean one. Functions skipped for the per-file
+deadline or a rate limit are not reported by the plugin at all, so a semantic
+run is evidence only about the functions it actually judged.
+
+`name-matches-body` scored 9/10 on the seeded benchmark and is used at
+threshold 0.80. `comment-matches-code` (0.80) and `helpful-error-message`
+(0.85) are **uncalibrated** — no labelled set exists for them yet. Measurements,
+call counts and latency: `docs/jev-lint/pilot-2026-09-21.md`.
+
 ## Validation and measured evidence
 
 ```sh
@@ -232,6 +269,7 @@ npm run check             # format, lint, strict project types, tests
 npm run test:unit         # mocked transport and real Pi extension loader
 npm run test:integration  # existing SDK smoke test; loads optional .env
 npm run smoke:jev         # optional live six-batch synthetic sidecar trial
+npm run lint:semantic     # optional advisory semantic lint; needs a key
 ```
 
 `npm run check` passes offline without a key; the existing live SDK test skips
