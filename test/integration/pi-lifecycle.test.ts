@@ -50,6 +50,29 @@ async function loadPiAi() {
   }>;
 }
 
+async function withinLifecycleDeadline<T>(work: () => Promise<T>) {
+  const timeoutMs = 5_000;
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([
+      work(),
+      new Promise<never>((_, reject) => {
+        timer = setTimeout(
+          () =>
+            reject(
+              new Error(
+                `Pi ${packageJson.version} lifecycle did not settle within ${timeoutMs}ms`,
+              ),
+            ),
+          timeoutMs,
+        );
+      }),
+    ]);
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 function workerManifest(receipts: string) {
   const value = {
     schema_version: "fm-worker-config/v1",
@@ -232,8 +255,10 @@ test("real AgentSession completes pi-typesafe hooks and returns idle", async () 
     assert.equal(receipt.decisions.model.application, "runtime");
     assert.deepEqual(session.getActiveToolNames(), [probeTool.name]);
 
-    await session.prompt("Exercise the lifecycle hooks.");
-    await session.waitForIdle();
+    await withinLifecycleDeadline(async () => {
+      await session!.prompt("Exercise the lifecycle hooks.");
+      await session!.waitForIdle();
+    });
 
     assert.equal(toolExecutions, 1);
     assert.equal(faux.state.callCount, 3);
