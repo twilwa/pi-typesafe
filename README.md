@@ -13,9 +13,11 @@ Missing credentials or any judge failure always leaves the tool untouched.
 
 ## Try it
 
-Use Node.js 24 and **Pi 0.85.1** (`@earendil-works/pi-coding-agent`). Pi itself
-requires Node >=22.19.0; this repository uses Node 24 to run TypeScript tests
-without a build step.
+Use Node.js 24 and **Pi 0.85.1** (`@earendil-works/pi-coding-agent`), the pinned
+development version. The extension is also tested with Pi 0.87.0; see the
+[compatibility report](docs/compat/pi-0.87.0.md). Pi itself requires Node
+22.19.0 or newer; this repository uses Node 24 to run TypeScript tests without a
+build step.
 
 ```sh
 npm ci
@@ -305,6 +307,8 @@ remain strict and typechecked against Pi's real declarations.
 
 Verified against the installed **Pi 0.85.1 release**, its bundled
 `docs/extensions.md`, shipped extension `.d.ts` files, and extension examples.
+The full offline gate and real extension loader also pass with **Pi 0.87.0**;
+the compatibility report records the setup, results, and peer-range fix.
 The [versioned Pi docs](https://github.com/earendil-works/pi/blob/d981de1229ef899957bbe968bc8dcda02a21f477/packages/coding-agent/docs/extensions.md)
 document the default TypeScript factory, mutable pre-execution inputs, blocking
 return contract, and middleware-style result patches. This extension uses
