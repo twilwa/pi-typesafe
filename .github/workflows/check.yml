@@ -4,12 +4,29 @@ permissions:
   contents: read
 jobs:
   check:
+    name: Pi ${{ matrix.pi }}
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        pi: ["0.85.1", "0.87.0"]
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
           node-version: 24
-          cache: npm
-      - run: npm ci
-      - run: npm run check
+      - name: Install Pi in an isolated prefix
+        env:
+          PI_VERSION: ${{ matrix.pi }}
+        run: |
+          prefix="$RUNNER_TEMP/pi-$PI_VERSION"
+          mkdir -p "$prefix"
+          cp -a "$GITHUB_WORKSPACE/." "$prefix/repo"
+          npm ci --prefix "$prefix/repo"
+          npm install --prefix "$prefix/repo" --no-save --package-lock=false \
+            "@earendil-works/pi-coding-agent@$PI_VERSION"
+          actual="$(node -p "require('$prefix/repo/node_modules/@earendil-works/pi-coding-agent/package.json').version")"
+          test "$actual" = "$PI_VERSION"
+          echo "PI_TEST_ROOT=$prefix/repo" >> "$GITHUB_ENV"
+      - name: Run full offline gate
+        run: npm run check --prefix "$PI_TEST_ROOT"

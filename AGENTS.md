@@ -11,7 +11,9 @@ This file is the project's committed home for project-intrinsic agent knowledge:
 ## Linting
 
 - `npm run check` (format, lint, typecheck, test) is the authoritative gate. It is deterministic,
-  offline, and needs no credentials; CI runs the same command. Keep it that way.
+  offline, and needs no credentials; CI runs the same command against Pi 0.85.1 and 0.87.0 in
+  isolated prefixes. `test/integration/pi-lifecycle.test.ts` holds both releases to the real-session
+  lifecycle contract. Keep it that way.
 - `npm run lint:semantic` is an **optional** advisory check: `eslint-plugin-jev` asks the TypeSafe
   Jev model plain-English questions about each function, configured in `eslint.semantic.config.js`
   and never in `eslint.config.js`. It needs a key:

@@ -11,15 +11,49 @@ The extension code is compatible with Pi 0.87.0. The full offline gate passed
 against that release:
 
 - Prettier, ESLint, and TypeScript completed without errors.
-- 48 tests ran. 47 passed, none failed, and the live TypeSafe test skipped
+- 60 tests ran. 59 passed, none failed, and the live TypeSafe test skipped
   because `TYPESAFE_API_KEY` was absent.
 - The unit suite loaded `src/extension.ts` through Pi 0.87.0's real extension
   loader and found one `tool_call` handler and one `tool_result` handler.
 - No paid TypeSafe calls ran.
 
-The same `npm run check` gate passed in the repository's pinned Pi 0.85.1
-environment before the compatibility run. After the metadata fix and its test,
-the gate ran 49 tests: 48 passed, none failed, and the live test skipped.
+The CI gate now runs the full repository suite independently against pinned Pi
+0.85.1 and 0.87.0 installations. Each matrix leg copies the checkout into its
+own runner-temporary prefix, installs only that leg's Pi version there, verifies
+the installed version, and fails if `npm run check` fails. It never installs or
+updates a host-global Pi.
+
+## Real-session lifecycle difference
+
+The matrix includes a real `AgentSession` test, not only an extension-loader
+test. It loads pi-typesafe and an asynchronous lifecycle observer, runs an
+offline faux-model turn through a custom tool, and therefore exercises
+pi-typesafe's `session_start`, `tool_call`, and `tool_result` handlers. Startup
+selection must write its receipt and apply the selected model before the turn.
+At the first `agent_settled` boundary, the observer requests one continuation,
+waits briefly, and returns; the continuation must complete and the session must
+be idle after three model calls and one tool execution.
+
+The asserted version difference is exact:
+
+- Pi 0.85.1 starts a `triggerTurn` continuation requested by an
+  `agent_settled` handler immediately, so `ctx.isIdle()` is false directly after
+  the request.
+- Pi 0.87.0 leaves `ctx.isIdle()` true at that point and starts the continuation
+  only after all `agent_settled` handlers return.
+
+This is the same deferral observed in
+`/home/firstmate/firstmate/data/hl-solpi-deployment-check/report.md`. That report
+found SoL-Pi waiting inside `agent_settled` for work that 0.87.0 cannot start
+until the handler returns. Pi-typesafe is not exposed to that cycle: it
+registers no `agent_settled` handler, its awaited startup work runs in
+`session_start`, and its awaited tool work runs within the tool lifecycle. The
+test's asynchronous settled co-handler deliberately returns without awaiting
+the child continuation, proving pi-typesafe completes and the session drains on
+both supported versions. No runtime hook fix was needed.
+
+The same 60-test `npm run check` gate passed in the repository's pinned Pi
+0.85.1 environment: 59 passed, none failed, and the live test skipped.
 
 ## Packaging break
 
