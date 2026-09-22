@@ -154,7 +154,7 @@ async function fixture(
     setThinkingLevel(value: string) {
       efforts.push(value);
     },
-  } as Pick<ExtensionAPI, "setActiveTools" | "setModel" | "setThinkingLevel">;
+  } as unknown as ExtensionAPI;
   const cwd = options.cwdRelative ? resolve(root, options.cwdRelative) : root;
   if (options.cwdRelative) await mkdir(cwd, { recursive: true });
   const ctx = {
@@ -221,6 +221,35 @@ test("manifest validation refuses a static selection outside owner bounds", () =
   value.selection.model = "other/disallowed";
   value.integrity.self_sha256 = manifestSha256(value);
   assert.throws(() => parseWorkerManifest(value), /Static model exceeds/);
+});
+
+test("manifest validation accepts only bounded catalog artifacts and experimental opt-ins", () => {
+  const value = manifest();
+  Object.assign(value, {
+    extension_catalog: {
+      path: "catalog.json",
+      sha256: "c".repeat(64),
+      artifacts: { "extra-extension": "artifacts/extra-extension" },
+      experimental_opt_in: ["extra-extension"],
+    },
+  });
+  value.integrity.self_sha256 = manifestSha256(value);
+  assert.deepEqual(parseWorkerManifest(value).extensionCatalog, {
+    path: "catalog.json",
+    sha256: "c".repeat(64),
+    artifacts: { "extra-extension": "artifacts/extra-extension" },
+    experimentalOptIn: ["extra-extension"],
+  });
+
+  const outsideBounds = structuredClone(value) as typeof value & {
+    extension_catalog: { experimental_opt_in: string[] };
+  };
+  outsideBounds.extension_catalog.experimental_opt_in = ["unknown-extension"];
+  outsideBounds.integrity.self_sha256 = manifestSha256(outsideBounds);
+  assert.throws(
+    () => parseWorkerManifest(outsideBounds),
+    /catalog configuration exceeds worker bounds/,
+  );
 });
 
 test("low-confidence decisions abstain to the manifest static profile", async () => {

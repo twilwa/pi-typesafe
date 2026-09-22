@@ -4,6 +4,7 @@ This file is the project's committed home for project-intrinsic agent knowledge:
 
 - See `README.md` for verified Pi/TypeSafe contracts, scope boundaries, credentials, and validation commands.
 - The Pi entry is `src/extension.ts`; sidecar question policy lives in `src/checks.ts`, failure/timeout handling in `src/sidecar.ts`, startup worker selection in `src/selection.ts`, and runtime response checks in `src/verdict.ts`. Keep advisory mode the default and judge failures a quiet no-op.
+- Catalog-backed startup loading lives in `src/extension-catalog.ts`; `README.md` defines its additive manifest fields and local-only verification contract. Keep catalog decisions in the selection receipt and never download an artifact.
 - Keep SDK request/response types authoritative; the thin boundary is `src/typesafe.ts`.
 - Offline development must work without credentials; keep live tests in `test/integration/` and skip them when the key is absent.
 - Treat the filesystem check as a path-based model assessment, not deterministic containment; `README.md` documents alias/race limits and best-effort timing.

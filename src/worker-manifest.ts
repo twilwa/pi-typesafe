@@ -31,6 +31,7 @@ export interface WorkerSelection {
 
 export interface WorkerManifest {
   identity: { taskId: string; lane: string; briefSha256: string };
+  runtime: { version: string };
   bounds: {
     modelsAllowed: string[];
     effortMax: WorkerEffort;
@@ -42,6 +43,12 @@ export interface WorkerManifest {
     jev: { maxCalls: number; maxTokens: number; stateMaxTokens: number };
   };
   selection: WorkerSelection;
+  extensionCatalog?: {
+    path: string;
+    sha256: string;
+    artifacts: Record<string, string>;
+    experimentalOptIn: string[];
+  };
   receipts: string;
   sha256: string;
 }
@@ -75,6 +82,19 @@ function stringSet(parent: Record<string, unknown>, name: string) {
   )
     throw new Error(`Invalid worker manifest field: ${name}`);
   return value as string[];
+}
+
+function stringMap(parent: Record<string, unknown>, name: string) {
+  const value = parent[name];
+  if (
+    !record(value) ||
+    Object.entries(value).some(
+      ([key, item]) =>
+        !key || typeof item !== "string" || !item || item.includes("\0"),
+    )
+  )
+    throw new Error(`Invalid worker manifest field: ${name}`);
+  return value as Record<string, string>;
 }
 
 function effort(value: unknown): WorkerEffort {
@@ -140,6 +160,9 @@ export function parseWorkerManifest(raw: unknown): WorkerManifest {
   const selectedSkills = stringSet(selected, "skills");
   const selectedExtensions = stringSet(selected, "extensions");
   const selectedHooks = stringSet(selected, "hooks");
+  const runtimeVersion = stringField(runtime, "version");
+  if (!/^\d+\.\d+\.\d+$/.test(runtimeVersion))
+    throw new Error("Invalid Pi runtime version");
   const effortMax = effort(bounds.effort_max);
   if (!modelsAllowed.includes(selectedModel))
     throw new Error("Static model exceeds worker bounds");
@@ -198,8 +221,31 @@ export function parseWorkerManifest(raw: unknown): WorkerManifest {
   )
     throw new Error("Invalid worker identity");
 
+  let extensionCatalog: WorkerManifest["extensionCatalog"];
+  if (raw.extension_catalog !== undefined) {
+    const configured = field(raw, "extension_catalog");
+    const catalogPath = stringField(configured, "path");
+    const catalogSha256 = stringField(configured, "sha256");
+    const artifacts = stringMap(configured, "artifacts");
+    const experimentalOptIn = stringSet(configured, "experimental_opt_in");
+    if (!/^[0-9a-f]{64}$/.test(catalogSha256))
+      throw new Error("Invalid extension catalog hash");
+    if (
+      Object.keys(artifacts).some((id) => !extensionsAllowed.includes(id)) ||
+      experimentalOptIn.some((id) => !extensionsAllowed.includes(id))
+    )
+      throw new Error("Extension catalog configuration exceeds worker bounds");
+    extensionCatalog = {
+      path: catalogPath,
+      sha256: catalogSha256,
+      artifacts,
+      experimentalOptIn,
+    };
+  }
+
   return {
     identity: { taskId, lane, briefSha256 },
+    runtime: { version: runtimeVersion },
     bounds: {
       modelsAllowed,
       effortMax,
@@ -229,6 +275,7 @@ export function parseWorkerManifest(raw: unknown): WorkerManifest {
       context: { policy: contextPolicy, compaction },
       sandbox: { kind: sandboxKind, template: sandboxTemplate },
     },
+    extensionCatalog,
     receipts,
     sha256,
   };
