@@ -96,7 +96,9 @@ The loader never downloads or installs an extension. It checks the checkout's
 streams and verifies every listed artifact hash. A file-valued `source.subpath`
 is the extension entry point. For a directory-valued subpath, the loader reads
 the checkout's `package.json` and loads only `pi.extensions` entries inside that
-directory.
+directory. Every imported entry point must have its own `source.hashes` record.
+For a multi-entry package, the loader stages every factory and commits its Pi
+registrations only after all factories return successfully.
 
 An entry loads only when its status is `implemented`, or when it is
 `experimental` and opted in. The exact `runtime.version` also needs a
@@ -126,7 +128,8 @@ Each line contains:
 - when `extension_catalog` is present, its verified SHA-256 and one ordered
   load decision per selected extension ID. Refusals use stable reason codes such
   as `hash-mismatch`, `status-proposed`, `unsupported-pi-version`,
-  `experimental-opt-in-required`, and `prerequisite-unmet`.
+  `experimental-opt-in-required`, `entrypoint-unhashed`, and
+  `prerequisite-unmet`.
 
 Receipts never contain the brief, provider state, question wording, raw response,
 or error text. The request does contain the latest user brief, the static profile,

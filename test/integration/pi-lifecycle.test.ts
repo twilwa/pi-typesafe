@@ -129,7 +129,7 @@ function workerManifest(receipts: string, catalogSha256: string) {
       model: "lifecycle/lifecycle-1",
       effort: "medium",
       skills: [],
-      extensions: ["lifecycle-catalog-fixture"],
+      extensions: ["pi-typesafe", "lifecycle-catalog-fixture"],
       hooks: ["tool_call", "tool_result", "session_start"],
       mcp: [],
       tools_active: ["lifecycle_probe"],
@@ -140,7 +140,10 @@ function workerManifest(receipts: string, catalogSha256: string) {
     extension_catalog: {
       path: "catalog.json",
       sha256: catalogSha256,
-      artifacts: { "lifecycle-catalog-fixture": "artifact" },
+      artifacts: {
+        "pi-typesafe": "artifact",
+        "lifecycle-catalog-fixture": "artifact",
+      },
       experimental_opt_in: [],
     },
     domains: {},
@@ -218,39 +221,41 @@ test("real AgentSession completes pi-typesafe hooks and returns idle", async () 
     const commit = execFileSync("git", ["-C", artifact, "rev-parse", "HEAD"], {
       encoding: "utf8",
     }).trim();
+    const catalogEntry = (id: string) => ({
+      id,
+      display_name: id,
+      status: "implemented",
+      source: {
+        repository: "https://github.com/example/lifecycle-fixture.git",
+        commit,
+        subpath: "extension.mjs",
+        hashes: [
+          { artifact: "extension.mjs", sha256: sha256(extensionSource) },
+          { artifact: "README.md", sha256: sha256(fixtureReadme) },
+        ],
+      },
+      compatibility: [
+        {
+          pi_version: packageJson.version,
+          state: "compatible",
+          note: "Exercised by the real-session lifecycle matrix.",
+          evidence: [
+            {
+              kind: "repository-file",
+              locator: "README.md",
+              revision: commit,
+              sha256: sha256(fixtureReadme),
+            },
+          ],
+        },
+      ],
+      prerequisites: [],
+    });
     const catalog = {
       schema_version: "extension-catalog/v1",
       extensions: [
-        {
-          id: "lifecycle-catalog-fixture",
-          display_name: "Lifecycle catalog fixture",
-          status: "implemented",
-          source: {
-            repository: "https://github.com/example/lifecycle-fixture.git",
-            commit,
-            subpath: "extension.mjs",
-            hashes: [
-              { artifact: "extension.mjs", sha256: sha256(extensionSource) },
-              { artifact: "README.md", sha256: sha256(fixtureReadme) },
-            ],
-          },
-          compatibility: [
-            {
-              pi_version: packageJson.version,
-              state: "compatible",
-              note: "Exercised by the real-session lifecycle matrix.",
-              evidence: [
-                {
-                  kind: "repository-file",
-                  locator: "README.md",
-                  revision: commit,
-                  sha256: sha256(fixtureReadme),
-                },
-              ],
-            },
-          ],
-          prerequisites: [],
-        },
+        catalogEntry("pi-typesafe"),
+        catalogEntry("lifecycle-catalog-fixture"),
       ],
     };
     await writeFile(catalogPath, JSON.stringify(catalog));
@@ -358,6 +363,11 @@ test("real AgentSession completes pi-typesafe hooks and returns idle", async () 
     assert.equal(receipt.provider.outcome, "unavailable");
     assert.equal(receipt.decisions.model.application, "runtime");
     assert.deepEqual(receipt.extensionCatalog.decisions, [
+      {
+        id: "pi-typesafe",
+        status: "implemented",
+        outcome: "already-loaded",
+      },
       {
         id: "lifecycle-catalog-fixture",
         status: "implemented",

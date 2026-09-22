@@ -5,7 +5,10 @@ import { lstat, readFile, realpath, stat } from "node:fs/promises";
 import { dirname, isAbsolute, relative, resolve, sep } from "node:path";
 import { pathToFileURL } from "node:url";
 import { promisify } from "node:util";
-import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import type {
+  ExtensionAPI,
+  ExtensionFactory,
+} from "@earendil-works/pi-coding-agent";
 import { record } from "./config.ts";
 import type { WorkerManifest } from "./worker-manifest.ts";
 
@@ -22,6 +25,7 @@ export type CatalogRefusalReason =
   | "artifact-path-missing"
   | "source-mismatch"
   | "hash-mismatch"
+  | "entrypoint-unhashed"
   | "entrypoint-missing"
   | "load-failed";
 
@@ -260,6 +264,7 @@ async function verifySource(root: string, entry: CatalogEntry) {
 }
 
 async function verifyHashes(root: string, entry: CatalogEntry) {
+  const verified = new Set<string>();
   for (const expected of entry.source.hashes) {
     const path = resolve(root, expected.artifact);
     let resolved: string;
@@ -276,16 +281,25 @@ async function verifyHashes(root: string, entry: CatalogEntry) {
       (await sha256File(resolved)) !== expected.sha256
     )
       throw new Refusal("hash-mismatch");
+    verified.add(resolved);
   }
+  return verified;
 }
 
-async function entrypoints(root: string, entry: CatalogEntry) {
+async function entrypoints(
+  root: string,
+  entry: CatalogEntry,
+  verified: Set<string>,
+) {
   const sourcePath = resolve(root, entry.source.subpath);
   const sourceRealPath = await realpath(sourcePath).catch(() => {
     throw new Refusal("entrypoint-missing");
   });
   if (!inside(root, sourceRealPath)) throw new Refusal("entrypoint-missing");
-  if ((await stat(sourceRealPath)).isFile()) return [sourceRealPath];
+  if ((await stat(sourceRealPath)).isFile()) {
+    if (!verified.has(sourceRealPath)) throw new Refusal("entrypoint-unhashed");
+    return [sourceRealPath];
+  }
   let packageValue: unknown;
   try {
     packageValue = JSON.parse(
@@ -305,19 +319,126 @@ async function entrypoints(root: string, entry: CatalogEntry) {
     const path = await realpath(resolve(root, item)).catch(() => {
       throw new Refusal("entrypoint-missing");
     });
-    if (inside(sourceRealPath, path)) paths.push(path);
+    if (inside(sourceRealPath, path)) {
+      if (!verified.has(path)) throw new Refusal("entrypoint-unhashed");
+      paths.push(path);
+    }
   }
   if (!paths.length) throw new Refusal("entrypoint-missing");
   return paths;
 }
 
-async function defaultLoad(path: string, pi: ExtensionAPI) {
-  const imported = (await import(pathToFileURL(path).href)) as {
-    default?: unknown;
+type Registration = () => void;
+
+const registrationMethods = new Set([
+  "on",
+  "registerTool",
+  "registerCommand",
+  "registerShortcut",
+  "registerFlag",
+  "registerMessageRenderer",
+  "registerMarkdownTransformer",
+  "registerEntryRenderer",
+  "registerProvider",
+  "unregisterProvider",
+]);
+
+const readMethods = new Set([
+  "getSessionName",
+  "getActiveTools",
+  "getAllTools",
+  "getCommands",
+  "getThinkingLevel",
+]);
+
+function stagedApi(pi: ExtensionAPI, registrations: Registration[]) {
+  const flags = new Map<string, boolean | string | undefined>();
+  const events = {
+    emit() {
+      throw new Error("Event emission is unavailable during staged loading");
+    },
+    on(channel: string, handler: (data: unknown) => void) {
+      let active = true;
+      let unsubscribe: (() => void) | undefined;
+      registrations.push(() => {
+        if (active) unsubscribe = pi.events.on(channel, handler);
+      });
+      return () => {
+        active = false;
+        unsubscribe?.();
+      };
+    },
   };
-  if (typeof imported.default !== "function")
-    throw new Error("Missing extension factory");
-  await imported.default(pi);
+  return new Proxy({} as ExtensionAPI, {
+    get(_target, property) {
+      if (property === "events") return events;
+      if (property === "getFlag")
+        return (name: string) =>
+          flags.has(name) ? flags.get(name) : pi.getFlag(name);
+      if (typeof property !== "string") return undefined;
+      if (registrationMethods.has(property))
+        return (...args: unknown[]) => {
+          if (property === "registerFlag") {
+            const [name, options] = args as [
+              string,
+              { type: "boolean" | "string"; default?: boolean | string },
+            ];
+            if (
+              options.default !== undefined &&
+              typeof options.default !== options.type
+            )
+              throw new Error(
+                `Invalid default for flag ${JSON.stringify(name)}`,
+              );
+            flags.set(name, options.default);
+          }
+          if (
+            property === "registerProvider" &&
+            typeof args[0] === "string" &&
+            !args[1]
+          )
+            throw new Error("Provider config is required");
+          registrations.push(() => {
+            Reflect.apply(
+              pi[property as keyof ExtensionAPI] as (
+                ...items: unknown[]
+              ) => unknown,
+              pi,
+              args,
+            );
+          });
+        };
+      if (readMethods.has(property))
+        return (...args: unknown[]) =>
+          Reflect.apply(
+            pi[property as keyof ExtensionAPI] as (
+              ...items: unknown[]
+            ) => unknown,
+            pi,
+            args,
+          );
+      return () => {
+        throw new Error(`${property} is unavailable during staged loading`);
+      };
+    },
+  });
+}
+
+async function defaultLoad(paths: string[], pi: ExtensionAPI) {
+  const factories = await Promise.all(
+    paths.map(async (path) => {
+      const imported = (await import(pathToFileURL(path).href)) as {
+        default?: unknown;
+      };
+      if (typeof imported.default !== "function")
+        throw new Error("Missing extension factory");
+      return imported.default as ExtensionFactory;
+    }),
+  );
+  const registrations: Registration[] = [];
+  const staged = stagedApi(pi, registrations);
+  for (const factory of factories) await factory(staged);
+  for (const register of registrations) register();
 }
 
 export async function loadCatalogExtensions(options: {
@@ -326,7 +447,7 @@ export async function loadCatalogExtensions(options: {
   selected: string[];
   pi: ExtensionAPI;
   loaded: Set<string>;
-  load?: (path: string, pi: ExtensionAPI) => Promise<void>;
+  load?: (paths: string[], pi: ExtensionAPI) => Promise<void>;
 }): Promise<CatalogLoadReceipt | undefined> {
   const configured = options.manifest.extensionCatalog;
   if (!configured) return;
@@ -406,10 +527,9 @@ export async function loadCatalogExtensions(options: {
         throw new Refusal("artifact-path-missing");
       });
       await verifySource(root, entry);
-      await verifyHashes(root, entry);
-      const paths = await entrypoints(root, entry);
-      for (const path of paths)
-        await (options.load ?? defaultLoad)(path, options.pi);
+      const verified = await verifyHashes(root, entry);
+      const paths = await entrypoints(root, entry, verified);
+      await (options.load ?? defaultLoad)(paths, options.pi);
       options.loaded.add(id);
       decisions.push({ id, status: entry.status, outcome: "loaded" });
     } catch (error) {

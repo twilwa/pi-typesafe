@@ -231,7 +231,7 @@ export interface StartupSelectorOptions {
   now?: () => Date;
   debug?: (message: string) => void;
   receipt?: (receipt: SelectionReceipt) => void;
-  loadExtension?: (path: string, pi: ExtensionAPI) => Promise<void>;
+  loadExtension?: (paths: string[], pi: ExtensionAPI) => Promise<void>;
 }
 
 function defaultProvider(
@@ -644,7 +644,7 @@ export function createStartupSelector(
   };
   let provider = options.provider;
   const providerCalls = new Map<string, number>();
-  const loadedExtensions = new Set<string>();
+  const loadedExtensions = new Set(["pi-typesafe"]);
   if (!provider)
     try {
       provider = defaultProvider(env, options.fetch);

@@ -38,7 +38,16 @@ async function fixture() {
     "implemented.mjs": "export default function implemented() {}\n",
     "experimental.mjs": "export default function experimental() {}\n",
     "proposed.mjs": "export default function proposed() {}\n",
+    "multi-one.mjs":
+      "export default function multiOne(pi) { pi.on('turn_start', () => {}); }\n",
+    "multi-two.mjs":
+      "export default function multiTwo(pi) { pi.on('turn_end', () => {}); throw new Error('later factory failure'); }\n",
+    "package.json": JSON.stringify({
+      type: "module",
+      pi: { extensions: ["./multi-one.mjs", "./multi-two.mjs"] },
+    }),
     "README.md": "fixture stand-in; not SoL-Pi\n",
+    LICENSE: "fixture license\n",
   };
   await Promise.all(
     Object.entries(files).map(([path, body]) =>
@@ -186,8 +195,8 @@ async function load(
     selected,
     pi: {} as ExtensionAPI,
     loaded: new Set(),
-    load: async (path) => {
-      loadedPaths.push(path);
+    load: async (paths) => {
+      loadedPaths.push(...paths);
     },
   });
   return { receipt: receipt!, loadedPaths };
@@ -243,6 +252,99 @@ test("catalog refuses a pinned artifact hash mismatch", async () => {
   ]);
   assert.equal(result.receipt.decisions[0]!.reason, "hash-mismatch");
   assert.deepEqual(result.loadedPaths, []);
+});
+
+test("catalog refuses a source entry point omitted from the pinned hashes", async () => {
+  const value = await fixture();
+  const catalog = structuredClone(value.catalog);
+  catalog.extensions[0]!.source.hashes = [
+    {
+      artifact: "README.md",
+      sha256: hash("fixture stand-in; not SoL-Pi\n"),
+    },
+    { artifact: "LICENSE", sha256: hash("fixture license\n") },
+  ];
+  await writeFile(value.catalogPath, JSON.stringify(catalog));
+  const result = await load(manifest(catalog), value.root, [
+    "implemented-fixture",
+  ]);
+  assert.equal(result.receipt.decisions[0]!.reason, "entrypoint-unhashed");
+  assert.deepEqual(result.loadedPaths, []);
+});
+
+test("catalog refuses a package when any imported entry point is unhashed", async () => {
+  const value = await fixture();
+  const catalog = structuredClone(value.catalog);
+  catalog.extensions[0]!.source.subpath = ".";
+  catalog.extensions[0]!.source.hashes = [
+    {
+      artifact: "multi-one.mjs",
+      sha256: hash(
+        "export default function multiOne(pi) { pi.on('turn_start', () => {}); }\n",
+      ),
+    },
+    {
+      artifact: "package.json",
+      sha256: hash(
+        JSON.stringify({
+          type: "module",
+          pi: { extensions: ["./multi-one.mjs", "./multi-two.mjs"] },
+        }),
+      ),
+    },
+  ];
+  await writeFile(value.catalogPath, JSON.stringify(catalog));
+  const result = await load(manifest(catalog), value.root, [
+    "implemented-fixture",
+  ]);
+  assert.equal(result.receipt.decisions[0]!.reason, "entrypoint-unhashed");
+  assert.deepEqual(result.loadedPaths, []);
+});
+
+test("a later factory failure commits none of a multi-entry extension's handlers", async () => {
+  const value = await fixture();
+  const catalog = structuredClone(value.catalog);
+  catalog.extensions[0]!.source.subpath = ".";
+  catalog.extensions[0]!.source.hashes = [
+    {
+      artifact: "multi-one.mjs",
+      sha256: hash(
+        "export default function multiOne(pi) { pi.on('turn_start', () => {}); }\n",
+      ),
+    },
+    {
+      artifact: "multi-two.mjs",
+      sha256: hash(
+        "export default function multiTwo(pi) { pi.on('turn_end', () => {}); throw new Error('later factory failure'); }\n",
+      ),
+    },
+    {
+      artifact: "package.json",
+      sha256: hash(
+        JSON.stringify({
+          type: "module",
+          pi: { extensions: ["./multi-one.mjs", "./multi-two.mjs"] },
+        }),
+      ),
+    },
+  ];
+  await writeFile(value.catalogPath, JSON.stringify(catalog));
+  const registeredEvents: string[] = [];
+  const configured = manifest(catalog);
+  const receipt = await loadCatalogExtensions({
+    manifest: configured,
+    manifestPath: resolve(value.root, "worker.json"),
+    selected: ["implemented-fixture"],
+    pi: {
+      on(event: string) {
+        registeredEvents.push(event);
+      },
+      events: { emit() {}, on: () => () => {} },
+    } as unknown as ExtensionAPI,
+    loaded: new Set(),
+  });
+  assert.equal(receipt!.decisions[0]!.reason, "load-failed");
+  assert.deepEqual(registeredEvents, []);
 });
 
 test("catalog refuses entries with unmet prerequisites", async () => {
