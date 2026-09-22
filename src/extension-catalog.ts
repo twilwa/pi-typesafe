@@ -11,9 +11,11 @@ import type {
 } from "@earendil-works/pi-coding-agent";
 import { record } from "./config.ts";
 import type { WorkerManifest } from "./worker-manifest.ts";
+import { parseExtensionCatalogConfig } from "./worker-manifest.ts";
 
 const run = promisify(execFile);
 const MAX_CATALOG_BYTES = 1024 * 1024;
+export const EXTENSION_CATALOG_CONFIG_ENV = "PI_EXTENSION_CATALOG_CONFIG";
 
 export type CatalogRefusalReason =
   | "catalog-invalid"
@@ -39,6 +41,22 @@ export interface CatalogExtensionDecision {
 export interface CatalogLoadReceipt {
   sha256: string;
   decisions: CatalogExtensionDecision[];
+}
+
+async function standaloneConfig(path: string, extensionsAllowed: string[]) {
+  const bytes = await readFile(path);
+  if (bytes.byteLength > MAX_CATALOG_BYTES)
+    throw new Error("Extension catalog config exceeds local budget");
+  const raw: unknown = JSON.parse(bytes.toString("utf8"));
+  if (
+    !record(raw) ||
+    raw.schema_version !== "pi-extension-catalog-config/v1" ||
+    Object.keys(raw).some(
+      (name) => !["schema_version", "catalog"].includes(name),
+    )
+  )
+    throw new Error("Invalid extension catalog config");
+  return parseExtensionCatalogConfig(raw.catalog, extensionsAllowed);
 }
 
 interface CatalogHash {
@@ -444,14 +462,35 @@ async function defaultLoad(paths: string[], pi: ExtensionAPI) {
 export async function loadCatalogExtensions(options: {
   manifest: WorkerManifest;
   manifestPath: string;
+  catalogConfigPath?: string;
   selected: string[];
   pi: ExtensionAPI;
   loaded: Set<string>;
   load?: (paths: string[], pi: ExtensionAPI) => Promise<void>;
 }): Promise<CatalogLoadReceipt | undefined> {
-  const configured = options.manifest.extensionCatalog;
+  let configured = options.manifest.extensionCatalog;
+  let configurationPath = options.manifestPath;
+  if (!configured && options.catalogConfigPath) {
+    configurationPath = options.catalogConfigPath;
+    try {
+      configured = await standaloneConfig(
+        configurationPath,
+        options.manifest.bounds.extensionsAllowed,
+      );
+    } catch {
+      return {
+        sha256: "",
+        decisions: options.selected.map((id) => ({
+          id,
+          status: "unknown",
+          outcome: "refused",
+          reason: "catalog-invalid",
+        })),
+      };
+    }
+  }
   if (!configured) return;
-  const manifestDirectory = dirname(options.manifestPath);
+  const manifestDirectory = dirname(configurationPath);
   const catalogPath = isAbsolute(configured.path)
     ? configured.path
     : resolve(manifestDirectory, configured.path);

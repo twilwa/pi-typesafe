@@ -1,0 +1,12 @@
+{
+  "schema_version": "pi-extension-catalog-config/v1",
+  "catalog": {
+    "path": "extension-catalog.json",
+    "sha256": "4b29347a0b640380845fff8543e9be0fde245f0ddd8f253956daf774462e7d8b",
+    "artifacts": {
+      "pi-typesafe": "stand-ins",
+      "lane-core": "stand-ins"
+    },
+    "experimental_opt_in": []
+  }
+}

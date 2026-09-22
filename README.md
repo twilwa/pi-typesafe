@@ -67,12 +67,14 @@ module does not load an MCP schema.
 
 ### Catalog-backed extensions
 
-Add `extension_catalog` to the worker manifest to resolve and load the IDs in
-the final `selection.extensions` decision:
+Keep the worker manifest valid under the closed `fm-worker-config/v1` schema.
+Put catalog loading in a separate `pi-extension-catalog-config/v1` file, then
+set `PI_EXTENSION_CATALOG_CONFIG` to that file before Pi starts:
 
 ```json
 {
-  "extension_catalog": {
+  "schema_version": "pi-extension-catalog-config/v1",
+  "catalog": {
     "path": "config/extension-catalog.json",
     "sha256": "<canonical catalog SHA-256>",
     "artifacts": {
@@ -83,13 +85,26 @@ the final `selection.extensions` decision:
 }
 ```
 
-`path` is absolute or relative to the manifest directory. `sha256` uses sorted
-JSON keys and no insignificant whitespace, matching harness-lab's canonical
-catalog digest. `artifacts` maps an allowed extension ID to an existing local
-Git checkout. Relative artifact paths also start at the manifest directory.
-`experimental_opt_in` is the explicit allowlist for catalog entries whose
-status is `experimental`; every ID in that list and in `artifacts` must remain
+```sh
+PI_WORKER_MANIFEST=config/worker.json \
+PI_EXTENSION_CATALOG_CONFIG=config/pi-extension-catalog.json \
+pi -e ./src/extension.ts
+```
+
+Relative paths in `PI_EXTENSION_CATALOG_CONFIG` start at Pi's working
+directory. Relative `path` and `artifacts` values inside that file start at the
+file's directory. `sha256` uses sorted JSON keys and no insignificant
+whitespace, matching harness-lab's canonical catalog digest. `artifacts` maps
+an allowed extension ID to an existing local Git checkout.
+`experimental_opt_in` is the explicit allowlist for entries whose status is
+`experimental`. Every ID in `artifacts` and `experimental_opt_in` must remain
 inside `bounds.extensions_allowed`.
+
+The loader still accepts the older additive `extension_catalog` worker-manifest
+field when present. New manifests should use the separate file because the v1
+worker schema is closed and does not define that field. See
+[`docs/lane-manifests.md`](docs/lane-manifests.md) for runnable static,
+adaptive, and smaller-model examples.
 
 The loader never downloads or installs an extension. It checks the checkout's
 `origin` URL, exact `HEAD`, and clean status against the catalog source, then

@@ -1,0 +1,98 @@
+{
+  "schema_version": "fm-worker-config/v1",
+  "identity": {
+    "task_id": "lane-example-static",
+    "lane": "static",
+    "brief_sha256": "1111111111111111111111111111111111111111111111111111111111111111"
+  },
+  "runtime": {
+    "harness": "pi",
+    "version": "0.85.1",
+    "auth_mode": "subscription",
+    "backend": "tmux",
+    "permission_mode": "auto"
+  },
+  "bounds": {
+    "owner": "firstmate",
+    "models_allowed": ["openai-codex/gpt-5.6-sol"],
+    "effort_max": "medium",
+    "tools_allowed": ["read", "bash", "edit", "write"],
+    "mcp_allowed": [],
+    "skills_allowed": [],
+    "extensions_allowed": ["pi-typesafe", "lane-core"],
+    "hooks_allowed": [
+      "tool_call",
+      "tool_result",
+      "session_start",
+      "session_shutdown"
+    ],
+    "max_config_changes": 0,
+    "max_change_diff_lines": 400,
+    "jev": { "max_calls": 0, "max_tokens": 0, "state_max_tokens": 0 }
+  },
+  "selection": {
+    "owner": "worker",
+    "model": "openai-codex/gpt-5.6-sol",
+    "effort": "medium",
+    "skills": [],
+    "extensions": ["pi-typesafe", "lane-core"],
+    "hooks": ["tool_call", "tool_result", "session_start", "session_shutdown"],
+    "mcp": [],
+    "tools_active": ["read", "bash", "edit", "write"],
+    "retrieval": { "mode": "none", "max_hits": 0 },
+    "context": { "policy": "cached-prefix", "compaction": "native" },
+    "sandbox": { "kind": "worktree", "template": null }
+  },
+  "domains": {
+    "model": {
+      "owner": "worker",
+      "reload": "setModel",
+      "cache_effect": "may-lose-prefix"
+    },
+    "effort": {
+      "owner": "worker",
+      "reload": "setThinkingLevel",
+      "cache_effect": "none"
+    },
+    "tools": {
+      "owner": "worker",
+      "reload": "registerTool+setActiveTools",
+      "cache_effect": "schema-change-invalidates"
+    },
+    "skills": {
+      "owner": "worker",
+      "reload": "/reload",
+      "cache_effect": "system-prompt-change-invalidates"
+    },
+    "mcp": {
+      "owner": "worker",
+      "reload": "/reload",
+      "cache_effect": "schema-change-invalidates"
+    },
+    "context": {
+      "owner": "worker",
+      "reload": "context hook",
+      "cache_effect": "policy-dependent"
+    },
+    "sandbox": {
+      "owner": "firstmate",
+      "reload": "restart-only",
+      "cache_effect": "full"
+    }
+  },
+  "rollback_target": {
+    "config_sha256": "2222222222222222222222222222222222222222222222222222222222222222",
+    "worktree_base_commit": "3333333333333333333333333333333333333333"
+  },
+  "receipts": ".pi/receipts/lane-static.jsonl",
+  "provenance": {
+    "source": "static-dispatch",
+    "reason_class": "startup",
+    "jev_request_sha256": null,
+    "supersedes": null
+  },
+  "integrity": {
+    "self_sha256": "4266ffa10dae58573bc890c6f3b678025ee60433cb4dc8cf546a1c872a3f4edf",
+    "validated_by": "harness_lab/worker_config.py"
+  }
+}
