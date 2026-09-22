@@ -62,8 +62,49 @@ within bounds.
 Pi directly applies the selected model and effort with `setModel()` and
 `setThinkingLevel()`. It applies the manifest's static `tools_active` list with
 `setActiveTools()`. The other decisions stay bounded, recorded inputs for the
-owner-controlled resource reload path. This module does not turn manifest names
-into filesystem paths or load an MCP schema on its own.
+owner-controlled resource reload path. MCP names remain recorded decisions; this
+module does not load an MCP schema.
+
+### Catalog-backed extensions
+
+Add `extension_catalog` to the worker manifest to resolve and load the IDs in
+the final `selection.extensions` decision:
+
+```json
+{
+  "extension_catalog": {
+    "path": "config/extension-catalog.json",
+    "sha256": "<canonical catalog SHA-256>",
+    "artifacts": {
+      "my-extension": "/opt/pi-extensions/my-extension"
+    },
+    "experimental_opt_in": ["my-experimental-extension"]
+  }
+}
+```
+
+`path` is absolute or relative to the manifest directory. `sha256` uses sorted
+JSON keys and no insignificant whitespace, matching harness-lab's canonical
+catalog digest. `artifacts` maps an allowed extension ID to an existing local
+Git checkout. Relative artifact paths also start at the manifest directory.
+`experimental_opt_in` is the explicit allowlist for catalog entries whose
+status is `experimental`; every ID in that list and in `artifacts` must remain
+inside `bounds.extensions_allowed`.
+
+The loader never downloads or installs an extension. It checks the checkout's
+`origin` URL, exact `HEAD`, and clean status against the catalog source, then
+streams and verifies every listed artifact hash. A file-valued `source.subpath`
+is the extension entry point. For a directory-valued subpath, the loader reads
+the checkout's `package.json` and loads only `pi.extensions` entries inside that
+directory.
+
+An entry loads only when its status is `implemented`, or when it is
+`experimental` and opted in. The exact `runtime.version` also needs a
+`compatible` catalog row, and every prerequisite must be `satisfied`.
+`proposed` entries never load. A bad catalog digest or shape refuses every
+selected ID. Source, hash, status, compatibility, prerequisite, entry-point,
+and import failures are all fail-closed for that extension and do not prevent
+the Pi session from starting.
 
 If the provider is unavailable, errors, times out, exceeds the manifest token
 budget, returns low confidence, or proposes a disallowed value, the affected
@@ -82,6 +123,10 @@ Each line contains:
 - abstention reason codes and the canonical manifest SHA-256;
 - provider attempt status, request SHA-256, returned model, request ID, token
   usage, and latency.
+- when `extension_catalog` is present, its verified SHA-256 and one ordered
+  load decision per selected extension ID. Refusals use stable reason codes such
+  as `hash-mismatch`, `status-proposed`, `unsupported-pi-version`,
+  `experimental-opt-in-required`, and `prerequisite-unmet`.
 
 Receipts never contain the brief, provider state, question wording, raw response,
 or error text. The request does contain the latest user brief, the static profile,

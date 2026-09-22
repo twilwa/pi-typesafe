@@ -18,6 +18,10 @@ import type {
 import { configuredBaseURL, inRange, record } from "./config.ts";
 import { repositoryContext, task } from "./context.ts";
 import {
+  loadCatalogExtensions,
+  type CatalogLoadReceipt,
+} from "./extension-catalog.ts";
+import {
   choice,
   createTypeSafe,
   type Questions,
@@ -217,6 +221,7 @@ export interface SelectionReceipt {
     requestId?: string;
     usage?: { inputTokens: number; outputTokens: number };
   };
+  extensionCatalog?: CatalogLoadReceipt;
 }
 
 export interface StartupSelectorOptions {
@@ -226,6 +231,7 @@ export interface StartupSelectorOptions {
   now?: () => Date;
   debug?: (message: string) => void;
   receipt?: (receipt: SelectionReceipt) => void;
+  loadExtension?: (path: string, pi: ExtensionAPI) => Promise<void>;
 }
 
 function defaultProvider(
@@ -625,7 +631,7 @@ async function writeReceipt(path: string, receipt: SelectionReceipt) {
 
 /** Build the startup hook separately so provider behavior stays injectable and offline-testable. */
 export function createStartupSelector(
-  pi: Pick<ExtensionAPI, "setActiveTools" | "setModel" | "setThinkingLevel">,
+  pi: ExtensionAPI,
   options: StartupSelectorOptions = {},
 ) {
   const env = options.env ?? process.env;
@@ -638,6 +644,7 @@ export function createStartupSelector(
   };
   let provider = options.provider;
   const providerCalls = new Map<string, number>();
+  const loadedExtensions = new Set<string>();
   if (!provider)
     try {
       provider = defaultProvider(env, options.fetch);
@@ -718,6 +725,14 @@ export function createStartupSelector(
       }
       const resolved = resolveDecisions(manifest, result, fallback);
       await applyRuntime(pi, ctx, manifest, resolved);
+      const extensionCatalog = await loadCatalogExtensions({
+        manifest,
+        manifestPath: path,
+        selected: resolved.values.extensions as string[],
+        pi,
+        loaded: loadedExtensions,
+        load: options.loadExtension,
+      });
       const receipt: SelectionReceipt = {
         schemaVersion: "pi-typesafe-selection-receipt/v1",
         timestamp: (options.now ?? (() => new Date()))().toISOString(),
@@ -742,6 +757,7 @@ export function createStartupSelector(
               }
             : {}),
         },
+        ...(extensionCatalog ? { extensionCatalog } : {}),
       };
       await writeReceipt(receiptPath, receipt);
       options.receipt?.(receipt);

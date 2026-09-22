@@ -1,6 +1,14 @@
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 import { execFileSync } from "node:child_process";
-import { access, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import {
+  access,
+  mkdir,
+  mkdtemp,
+  readFile,
+  rm,
+  writeFile,
+} from "node:fs/promises";
 import { dirname, relative, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import test from "node:test";
@@ -73,7 +81,22 @@ async function withinLifecycleDeadline<T>(work: () => Promise<T>) {
   }
 }
 
-function workerManifest(receipts: string) {
+function canonical(value: unknown): string {
+  if (value === null || typeof value !== "object") return JSON.stringify(value);
+  if (Array.isArray(value)) return `[${value.map(canonical).join(",")}]`;
+  return `{${Object.entries(value as Record<string, unknown>)
+    .sort(([left], [right]) => left.localeCompare(right))
+    .map(([key, item]) => `${JSON.stringify(key)}:${canonical(item)}`)
+    .join(",")}}`;
+}
+
+function sha256(value: string | object) {
+  return createHash("sha256")
+    .update(typeof value === "string" ? value : canonical(value))
+    .digest("hex");
+}
+
+function workerManifest(receipts: string, catalogSha256: string) {
   const value = {
     schema_version: "fm-worker-config/v1",
     identity: {
@@ -95,7 +118,7 @@ function workerManifest(receipts: string) {
       tools_allowed: ["lifecycle_probe"],
       mcp_allowed: [],
       skills_allowed: [],
-      extensions_allowed: ["pi-typesafe"],
+      extensions_allowed: ["pi-typesafe", "lifecycle-catalog-fixture"],
       hooks_allowed: ["tool_call", "tool_result", "session_start"],
       max_config_changes: 0,
       max_change_diff_lines: 0,
@@ -106,13 +129,19 @@ function workerManifest(receipts: string) {
       model: "lifecycle/lifecycle-1",
       effort: "medium",
       skills: [],
-      extensions: ["pi-typesafe"],
+      extensions: ["lifecycle-catalog-fixture"],
       hooks: ["tool_call", "tool_result", "session_start"],
       mcp: [],
       tools_active: ["lifecycle_probe"],
       retrieval: { mode: "none", max_hits: 0 },
       context: { policy: "cached-prefix", compaction: "native" },
       sandbox: { kind: "worktree", template: null },
+    },
+    extension_catalog: {
+      path: "catalog.json",
+      sha256: catalogSha256,
+      artifacts: { "lifecycle-catalog-fixture": "artifact" },
+      experimental_opt_in: [],
     },
     domains: {},
     rollback_target: {
@@ -147,15 +176,89 @@ test("real AgentSession completes pi-typesafe hooks and returns idle", async () 
   }).trim();
   const scratch = await mkdtemp(resolve(root, ".pi-lifecycle-"));
   const manifestPath = resolve(scratch, "worker.json");
+  const catalogPath = resolve(scratch, "catalog.json");
   const receiptsPath = resolve(scratch, "receipts.jsonl");
   const previousManifest = process.env[WORKER_MANIFEST_ENV];
   let session:
     Awaited<ReturnType<typeof createAgentSession>>["session"] | undefined;
 
   try {
+    const artifact = resolve(scratch, "artifact");
+    await mkdir(artifact);
+    const extensionSource =
+      "export default function lifecycleCatalogFixture(pi) { pi.on('session_shutdown', () => {}); }\n";
+    const fixtureReadme = "Lifecycle-only catalog loader fixture.\n";
+    await writeFile(resolve(artifact, "extension.mjs"), extensionSource);
+    await writeFile(resolve(artifact, "README.md"), fixtureReadme);
+    execFileSync("git", ["init", "-q", artifact]);
+    execFileSync("git", [
+      "-C",
+      artifact,
+      "config",
+      "user.name",
+      "Lifecycle Test",
+    ]);
+    execFileSync("git", [
+      "-C",
+      artifact,
+      "config",
+      "user.email",
+      "lifecycle@example.invalid",
+    ]);
+    execFileSync("git", [
+      "-C",
+      artifact,
+      "remote",
+      "add",
+      "origin",
+      "https://github.com/example/lifecycle-fixture.git",
+    ]);
+    execFileSync("git", ["-C", artifact, "add", "."]);
+    execFileSync("git", ["-C", artifact, "commit", "-qm", "fixture"]);
+    const commit = execFileSync("git", ["-C", artifact, "rev-parse", "HEAD"], {
+      encoding: "utf8",
+    }).trim();
+    const catalog = {
+      schema_version: "extension-catalog/v1",
+      extensions: [
+        {
+          id: "lifecycle-catalog-fixture",
+          display_name: "Lifecycle catalog fixture",
+          status: "implemented",
+          source: {
+            repository: "https://github.com/example/lifecycle-fixture.git",
+            commit,
+            subpath: "extension.mjs",
+            hashes: [
+              { artifact: "extension.mjs", sha256: sha256(extensionSource) },
+              { artifact: "README.md", sha256: sha256(fixtureReadme) },
+            ],
+          },
+          compatibility: [
+            {
+              pi_version: packageJson.version,
+              state: "compatible",
+              note: "Exercised by the real-session lifecycle matrix.",
+              evidence: [
+                {
+                  kind: "repository-file",
+                  locator: "README.md",
+                  revision: commit,
+                  sha256: sha256(fixtureReadme),
+                },
+              ],
+            },
+          ],
+          prerequisites: [],
+        },
+      ],
+    };
+    await writeFile(catalogPath, JSON.stringify(catalog));
     await writeFile(
       manifestPath,
-      JSON.stringify(workerManifest(relative(root, receiptsPath))),
+      JSON.stringify(
+        workerManifest(relative(root, receiptsPath), sha256(catalog)),
+      ),
     );
     process.env[WORKER_MANIFEST_ENV] = manifestPath;
 
@@ -250,9 +353,17 @@ test("real AgentSession completes pi-typesafe hooks and returns idle", async () 
     ) as {
       provider: { outcome: string };
       decisions: { model: { application: string } };
+      extensionCatalog: { decisions: Array<{ id: string; outcome: string }> };
     };
     assert.equal(receipt.provider.outcome, "unavailable");
     assert.equal(receipt.decisions.model.application, "runtime");
+    assert.deepEqual(receipt.extensionCatalog.decisions, [
+      {
+        id: "lifecycle-catalog-fixture",
+        status: "implemented",
+        outcome: "loaded",
+      },
+    ]);
     assert.deepEqual(session.getActiveToolNames(), [probeTool.name]);
 
     await withinLifecycleDeadline(async () => {
