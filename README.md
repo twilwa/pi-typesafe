@@ -1,9 +1,10 @@
 # pi-typesafe
 
-A Jev coding sidecar for Pi: four pre-flight hazard checks before `bash`, `write`,
-and `edit`, and four diff-quality checks after successful `write` and `edit`.
-Questions share one TypeSafe System One request per phase. Jev returns typed
-values; this extension applies thresholds and writes fixed feedback text.
+A Jev coding sidecar for Pi, plus an optional bounded startup selector. The
+sidecar runs four pre-flight hazard checks before `bash`, `write`, and `edit`,
+and four diff-quality checks after successful `write` and `edit`. Questions
+share one TypeSafe System One request per phase. Jev returns typed values; this
+extension applies thresholds and writes fixed feedback text.
 
 **Advisory mode is the default.** It records assessments and appends qualifying
 feedback after execution without blocking tools. Blocking requires explicit
@@ -25,9 +26,9 @@ npm run check
 pi -e ./src/extension.ts
 ```
 
-With no key, the extension loads and does nothing. To enable evaluation, export
-`TYPESAFE_API_KEY` in Pi's environment, or copy `.env.example` to `.env`, enter the
-key locally, and load it before starting Pi:
+With no key and no worker manifest, the extension loads and does nothing. To
+enable evaluation, export `TYPESAFE_API_KEY` in Pi's environment, or copy
+`.env.example` to `.env`, enter the key locally, and load it before starting Pi:
 
 ```sh
 set -a
@@ -40,6 +41,54 @@ Pi does not automatically load this repository's `.env`. Local `.env` files are
 ignored by git; never commit credentials. The extension creates the existing
 `src/typesafe.ts` client only when a nonblank key is configured. Configuration is
 read when the extension loads; restart/reload it after changing configuration.
+
+## Startup worker selection
+
+Set `PI_WORKER_MANIFEST` to an absolute path or a path relative to Pi's working
+directory to enable startup selection. The file must use the
+`fm-worker-config/v1` fields from harness-lab and carry a valid canonical
+`integrity.self_sha256`. The extension validates the identity, bounds, static
+selection, Jev budget, receipt path, and every field it consumes. An invalid
+manifest is ignored before any provider call or runtime change.
+
+At `session_start`, one bounded request selects model, effort, skills,
+extensions, hooks, MCP servers, retrieval mode, and sandbox kind. Each candidate
+comes from the manifest. Code rejects values outside those lists and accepts a
+decision only at confidence 0.80 or higher. Static skills remain a floor, so the
+provider may add an allowed skill but cannot remove a deterministic selection.
+`pi-typesafe` also remains selected when writes are allowed and the extension is
+within bounds.
+
+Pi directly applies the selected model and effort with `setModel()` and
+`setThinkingLevel()`. It applies the manifest's static `tools_active` list with
+`setActiveTools()`. The other decisions stay bounded, recorded inputs for the
+owner-controlled resource reload path. This module does not turn manifest names
+into filesystem paths or load an MCP schema on its own.
+
+If the provider is unavailable, errors, times out, exceeds the manifest token
+budget, returns low confidence, or proposes a disallowed value, the affected
+axis uses the manifest's static selection. Model or effort application failure
+also retries the static value. Missing credentials therefore still produce a
+useful static startup and an abstention receipt; they do not leave the runtime in
+a half-selected state.
+
+The extension appends one JSON object to the repository-relative path in
+`receipts`. Each line contains:
+
+- the selected values, confidence, source, and whether Pi applied the value at
+  runtime;
+- abstention reason codes and the canonical manifest SHA-256;
+- provider attempt status, request SHA-256, returned model, request ID, token
+  usage, and latency.
+
+Receipts never contain the brief, provider state, question wording, raw response,
+or error text. The request does contain the latest user brief, the static profile,
+and allowed candidate names. Treat it like the sidecar's existing provider data:
+only configure a key for tasks approved for that endpoint.
+
+The unit suite injects a faux provider for selection, including select, abstain,
+failure, disallowed-value, and receipt-shape cases. `npm run check` remains fully
+offline and never needs a TypeSafe key.
 
 For a real-session trial, use a disposable Git repository, set `sidecar` to this
 checkout's absolute path, and launch:
