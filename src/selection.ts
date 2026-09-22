@@ -1,6 +1,14 @@
 import { createHash } from "node:crypto";
-import { appendFile, mkdir, readFile } from "node:fs/promises";
-import { dirname, isAbsolute, relative, resolve, sep } from "node:path";
+import { constants } from "node:fs";
+import { lstat, mkdir, open, readFile, realpath } from "node:fs/promises";
+import {
+  basename,
+  dirname,
+  isAbsolute,
+  relative,
+  resolve,
+  sep,
+} from "node:path";
 import { debuglog } from "node:util";
 import type {
   ExtensionAPI,
@@ -8,7 +16,7 @@ import type {
   SessionStartEvent,
 } from "@earendil-works/pi-coding-agent";
 import { configuredBaseURL, inRange, record } from "./config.ts";
-import { task } from "./context.ts";
+import { repositoryContext, task } from "./context.ts";
 import {
   choice,
   createTypeSafe,
@@ -547,19 +555,72 @@ function inside(root: string, path: string) {
   return rel !== ".." && !rel.startsWith(`..${sep}`) && !isAbsolute(rel);
 }
 
-async function writeReceipt(
-  cwd: string,
-  receiptPath: string,
-  receipt: SelectionReceipt,
-) {
-  const path = resolve(cwd, receiptPath);
-  if (!inside(resolve(cwd), path))
-    throw new Error("Receipt path leaves working tree");
-  await mkdir(dirname(path), { recursive: true });
-  await appendFile(path, `${JSON.stringify(receipt)}\n`, {
-    encoding: "utf8",
-    mode: 0o600,
-  });
+function errno(error: unknown, code: string) {
+  return (
+    error instanceof Error && (error as NodeJS.ErrnoException).code === code
+  );
+}
+
+async function ensureDirectoryWithoutSymlinks(root: string, directory: string) {
+  const rel = relative(root, directory);
+  if (!inside(root, directory))
+    throw new Error("Receipt path leaves repository");
+  let current = root;
+  for (const part of rel.split(sep).filter(Boolean)) {
+    current = resolve(current, part);
+    let info;
+    try {
+      info = await lstat(current);
+    } catch (error) {
+      if (!errno(error, "ENOENT")) throw error;
+      try {
+        await mkdir(current, { mode: 0o700 });
+      } catch (mkdirError) {
+        if (!errno(mkdirError, "EEXIST")) throw mkdirError;
+      }
+      info = await lstat(current);
+    }
+    if (info.isSymbolicLink() || !info.isDirectory())
+      throw new Error("Receipt parent must be a real directory");
+  }
+  const resolved = await realpath(current);
+  if (!inside(root, resolved))
+    throw new Error("Receipt parent leaves repository");
+  return resolved;
+}
+
+async function prepareReceiptPath(root: string, receiptPath: string) {
+  const path = resolve(root, receiptPath);
+  if (!inside(root, path)) throw new Error("Receipt path leaves repository");
+  const directory = await ensureDirectoryWithoutSymlinks(root, dirname(path));
+  const prepared = resolve(directory, basename(path));
+  try {
+    const info = await lstat(prepared);
+    if (info.isSymbolicLink() || !info.isFile())
+      throw new Error("Receipt must be a regular file");
+    const resolved = await realpath(prepared);
+    if (!inside(root, resolved))
+      throw new Error("Receipt file leaves repository");
+  } catch (error) {
+    if (!errno(error, "ENOENT")) throw error;
+  }
+  return prepared;
+}
+
+async function writeReceipt(path: string, receipt: SelectionReceipt) {
+  const handle = await open(
+    path,
+    constants.O_APPEND |
+      constants.O_CREAT |
+      constants.O_WRONLY |
+      constants.O_NOFOLLOW,
+    0o600,
+  );
+  try {
+    await handle.writeFile(`${JSON.stringify(receipt)}\n`, "utf8");
+  } finally {
+    await handle.close();
+  }
 }
 
 /** Build the startup hook separately so provider behavior stays injectable and offline-testable. */
@@ -576,6 +637,7 @@ export function createStartupSelector(
     }
   };
   let provider = options.provider;
+  const providerCalls = new Map<string, number>();
   if (!provider)
     try {
       provider = defaultProvider(env, options.fetch);
@@ -597,6 +659,15 @@ export function createStartupSelector(
       if (bytes.byteLength > MAX_MANIFEST_BYTES)
         throw new Error("Worker manifest exceeds local budget");
       const manifest = parseWorkerManifest(JSON.parse(bytes.toString("utf8")));
+      const discoveryController = new AbortController();
+      const repository = await repositoryContext(
+        ctx.cwd,
+        ctx.signal ?? discoveryController.signal,
+      );
+      const receiptPath = await prepareReceiptPath(
+        repository.root,
+        manifest.receipts,
+      );
       const input = providerInput(manifest, task(ctx));
       const selectionInputSha256 = hash(input);
       const estimatedTokens = Math.ceil(
@@ -606,13 +677,15 @@ export function createStartupSelector(
       let result: SelectionProviderResult | undefined;
       let outcome: SelectionReceipt["provider"]["outcome"] = "unavailable";
       let fallback: string | undefined = "provider-unavailable";
+      const callsUsed = providerCalls.get(manifest.identity.taskId) ?? 0;
       if (
         provider &&
-        manifest.bounds.jev.maxCalls > 0 &&
+        callsUsed < manifest.bounds.jev.maxCalls &&
         manifest.bounds.jev.maxTokens > 0 &&
         estimatedTokens <= manifest.bounds.jev.maxTokens &&
         estimatedTokens <= manifest.bounds.jev.stateMaxTokens
       ) {
+        providerCalls.set(manifest.identity.taskId, callsUsed + 1);
         try {
           const candidate = await boundedProviderCall(
             provider,
@@ -638,7 +711,10 @@ export function createStartupSelector(
         }
       } else if (provider) {
         outcome = "budget-refused";
-        fallback = "budget-refused";
+        fallback =
+          callsUsed >= manifest.bounds.jev.maxCalls
+            ? "max-calls-exhausted"
+            : "budget-refused";
       }
       const resolved = resolveDecisions(manifest, result, fallback);
       await applyRuntime(pi, ctx, manifest, resolved);
@@ -667,7 +743,7 @@ export function createStartupSelector(
             : {}),
         },
       };
-      await writeReceipt(ctx.cwd, manifest.receipts, receipt);
+      await writeReceipt(receiptPath, receipt);
       options.receipt?.(receipt);
     } catch {
       log(

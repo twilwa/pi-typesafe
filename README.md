@@ -70,10 +70,12 @@ budget, returns low confidence, or proposes a disallowed value, the affected
 axis uses the manifest's static selection. Model or effort application failure
 also retries the static value. Missing credentials therefore still produce a
 useful static startup and an abstention receipt; they do not leave the runtime in
-a half-selected state.
+a half-selected state. `bounds.jev.max_calls` is cumulative for each task while
+the extension instance remains loaded, so session resumes do not reset it.
 
-The extension appends one JSON object to the repository-relative path in
-`receipts`. Each line contains:
+The extension resolves `receipts` from the Git root and appends one JSON object
+per line. It refuses a receipt file or parent directory that is a symbolic link.
+Each line contains:
 
 - the selected values, confidence, source, and whether Pi applied the value at
   runtime;

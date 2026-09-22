@@ -1,5 +1,14 @@
 import assert from "node:assert/strict";
-import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { execFileSync } from "node:child_process";
+import {
+  access,
+  mkdir,
+  mkdtemp,
+  readFile,
+  rm,
+  symlink,
+  writeFile,
+} from "node:fs/promises";
 import { resolve } from "node:path";
 import { after, test } from "node:test";
 import type {
@@ -114,9 +123,16 @@ function proposals(
 async function fixture(
   provider: SelectionProvider,
   manifestValue = manifest(),
+  options: {
+    cwdRelative?: string;
+    starts?: number;
+    prepare?: (root: string) => Promise<void>;
+  } = {},
 ) {
   const root = await mkdtemp(resolve(".selection-test-"));
   roots.push(root);
+  execFileSync("git", ["init", "-q", root]);
+  await options.prepare?.(root);
   const path = resolve(root, "worker.json");
   await writeFile(path, JSON.stringify(manifestValue));
   const models = ["static", "selected"].map((id) => ({
@@ -139,8 +155,10 @@ async function fixture(
       efforts.push(value);
     },
   } as Pick<ExtensionAPI, "setActiveTools" | "setModel" | "setThinkingLevel">;
+  const cwd = options.cwdRelative ? resolve(root, options.cwdRelative) : root;
+  if (options.cwdRelative) await mkdir(cwd, { recursive: true });
   const ctx = {
-    cwd: root,
+    cwd,
     signal: undefined,
     scopedModels: [],
     modelRegistry: { getAvailable: () => models },
@@ -159,13 +177,19 @@ async function fixture(
     now: () => new Date("2026-09-22T12:00:00.000Z"),
     receipt: (value) => captured.push(value),
   });
-  await selector({ type: "session_start", reason: "startup" }, ctx);
+  for (let index = 0; index < (options.starts ?? 1); index++)
+    await selector({ type: "session_start", reason: "startup" }, ctx);
   const receiptText = await readFile(
     resolve(root, manifestValue.receipts),
     "utf8",
   );
+  const receipts = receiptText
+    .trim()
+    .split("\n")
+    .map((line) => JSON.parse(line) as SelectionReceipt);
   return {
-    receipt: JSON.parse(receiptText.trim()) as SelectionReceipt,
+    receipt: receipts.at(-1)!,
+    receipts,
     captured,
     selectedModels,
     efforts,
@@ -280,4 +304,83 @@ test("receipt exposes decisions and attempt metadata but no state or question te
   const serialized = JSON.stringify(result.receipt);
   assert.doesNotMatch(serialized, /Implement the bounded selector/);
   assert.doesNotMatch(serialized, /question|state/i);
+});
+
+test("receipt paths resolve from the Git root when Pi starts in a subdirectory", async () => {
+  const result = await fixture(
+    {
+      async select() {
+        return proposals();
+      },
+    },
+    manifest(),
+    { cwdRelative: "packages/worker" },
+  );
+  assert.equal(result.receipts.length, 1);
+});
+
+test("receipt writing refuses a symlinked parent that leaves the Git root", async () => {
+  const outside = await mkdtemp(resolve(".selection-outside-"));
+  roots.push(outside);
+  await assert.rejects(
+    fixture(
+      {
+        async select() {
+          return proposals();
+        },
+      },
+      manifest(),
+      {
+        prepare: async (root) => {
+          await symlink(outside, resolve(root, "state"), "dir");
+        },
+      },
+    ),
+  );
+  await assert.rejects(access(resolve(outside, "TES-160/receipts.jsonl")));
+});
+
+test("receipt writing refuses a symlinked receipt file", async () => {
+  const outside = await mkdtemp(resolve(".selection-outside-"));
+  roots.push(outside);
+  const target = resolve(outside, "user-file");
+  await writeFile(target, "preserve me\n");
+  await assert.rejects(
+    fixture(
+      {
+        async select() {
+          return proposals();
+        },
+      },
+      manifest(),
+      {
+        prepare: async (root) => {
+          const directory = resolve(root, "state/TES-160");
+          await mkdir(directory, { recursive: true });
+          await symlink(target, resolve(directory, "receipts.jsonl"));
+        },
+      },
+    ),
+  );
+  assert.equal(await readFile(target, "utf8"), "preserve me\n");
+});
+
+test("max_calls is enforced across repeated session starts", async () => {
+  const value = manifest();
+  value.bounds.jev.max_calls = 1;
+  value.integrity.self_sha256 = manifestSha256(value);
+  let attempts = 0;
+  const result = await fixture(
+    {
+      async select() {
+        attempts++;
+        return proposals();
+      },
+    },
+    value,
+    { starts: 2 },
+  );
+  assert.equal(attempts, 1);
+  assert.equal(result.receipts.length, 2);
+  assert.equal(result.receipts[1]!.provider.outcome, "budget-refused");
 });
