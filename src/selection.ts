@@ -18,6 +18,7 @@ import type {
 import { configuredBaseURL, inRange, record } from "./config.ts";
 import { repositoryContext, task } from "./context.ts";
 import {
+  EXTENSION_CATALOG_CONFIG_ENV,
   loadCatalogExtensions,
   type CatalogLoadReceipt,
 } from "./extension-catalog.ts";
@@ -728,6 +729,11 @@ export function createStartupSelector(
       const extensionCatalog = await loadCatalogExtensions({
         manifest,
         manifestPath: path,
+        catalogConfigPath: env[EXTENSION_CATALOG_CONFIG_ENV]?.trim()
+          ? isAbsolute(env[EXTENSION_CATALOG_CONFIG_ENV]!.trim())
+            ? env[EXTENSION_CATALOG_CONFIG_ENV]!.trim()
+            : resolve(ctx.cwd, env[EXTENSION_CATALOG_CONFIG_ENV]!.trim())
+          : undefined,
         selected: resolved.values.extensions as string[],
         pi,
         loaded: loadedExtensions,

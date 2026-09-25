@@ -53,6 +53,10 @@ export interface WorkerManifest {
   sha256: string;
 }
 
+export type ExtensionCatalogConfig = NonNullable<
+  WorkerManifest["extensionCatalog"]
+>;
+
 function field(parent: Record<string, unknown>, name: string) {
   const value = parent[name];
   if (!record(value)) throw new Error(`Invalid worker manifest field: ${name}`);
@@ -97,6 +101,36 @@ function stringMap(parent: Record<string, unknown>, name: string) {
   return value as Record<string, string>;
 }
 
+export function parseExtensionCatalogConfig(
+  raw: unknown,
+  extensionsAllowed: string[],
+): ExtensionCatalogConfig {
+  if (!record(raw)) throw new Error("Invalid extension catalog configuration");
+  const catalogPath = stringField(raw, "path");
+  const catalogSha256 = stringField(raw, "sha256");
+  const artifacts = stringMap(raw, "artifacts");
+  const experimentalOptIn = stringSet(raw, "experimental_opt_in");
+  if (
+    Object.keys(raw).some(
+      (name) =>
+        !["path", "sha256", "artifacts", "experimental_opt_in"].includes(name),
+    ) ||
+    !/^[0-9a-f]{64}$/.test(catalogSha256)
+  )
+    throw new Error("Invalid extension catalog configuration");
+  if (
+    Object.keys(artifacts).some((id) => !extensionsAllowed.includes(id)) ||
+    experimentalOptIn.some((id) => !extensionsAllowed.includes(id))
+  )
+    throw new Error("Extension catalog configuration exceeds worker bounds");
+  return {
+    path: catalogPath,
+    sha256: catalogSha256,
+    artifacts,
+    experimentalOptIn,
+  };
+}
+
 function effort(value: unknown): WorkerEffort {
   if (!effortLevels.includes(value as WorkerEffort))
     throw new Error("Invalid worker effort");
@@ -117,7 +151,7 @@ function canonical(value: unknown): string {
     .join(",")}}`;
 }
 
-/** Match harness-lab's canonical digest, excluding the circular self-hash. */
+/** Match the worker-manifest canonical digest, excluding the circular self-hash. */
 export function manifestSha256(raw: Record<string, unknown>) {
   const copy = structuredClone(raw);
   if (record(copy.integrity)) delete copy.integrity.self_sha256;
@@ -223,24 +257,10 @@ export function parseWorkerManifest(raw: unknown): WorkerManifest {
 
   let extensionCatalog: WorkerManifest["extensionCatalog"];
   if (raw.extension_catalog !== undefined) {
-    const configured = field(raw, "extension_catalog");
-    const catalogPath = stringField(configured, "path");
-    const catalogSha256 = stringField(configured, "sha256");
-    const artifacts = stringMap(configured, "artifacts");
-    const experimentalOptIn = stringSet(configured, "experimental_opt_in");
-    if (!/^[0-9a-f]{64}$/.test(catalogSha256))
-      throw new Error("Invalid extension catalog hash");
-    if (
-      Object.keys(artifacts).some((id) => !extensionsAllowed.includes(id)) ||
-      experimentalOptIn.some((id) => !extensionsAllowed.includes(id))
-    )
-      throw new Error("Extension catalog configuration exceeds worker bounds");
-    extensionCatalog = {
-      path: catalogPath,
-      sha256: catalogSha256,
-      artifacts,
-      experimentalOptIn,
-    };
+    extensionCatalog = parseExtensionCatalogConfig(
+      field(raw, "extension_catalog"),
+      extensionsAllowed,
+    );
   }
 
   return {

@@ -1,0 +1,113 @@
+{
+  "schema_version": "extension-catalog/v1",
+  "extensions": [
+    {
+      "id": "pi-typesafe",
+      "display_name": "pi-typesafe (already loaded)",
+      "status": "implemented",
+      "source": {
+        "repository": "https://github.com/example/pi-lane-fixtures.git",
+        "commit": "0000000000000000000000000000000000000000",
+        "subpath": "lane-core.mjs",
+        "hashes": [
+          {
+            "artifact": "lane-core.mjs",
+            "sha256": "4ee7f1368683c92e52dc5833fb713e2c07ce1e99dc1aa7567c9da6ac9cd0b01a"
+          },
+          {
+            "artifact": "README.md",
+            "sha256": "448817e09e9b190cb3e15e818154c66446bbf0c5bfe7bd4524b5f10bf27f418d"
+          }
+        ]
+      },
+      "compatibility": [
+        {
+          "pi_version": "0.85.1",
+          "state": "compatible",
+          "note": "Covered by the real AgentSession example test.",
+          "evidence": [
+            {
+              "kind": "repository-file",
+              "locator": "README.md",
+              "revision": "0000000000000000000000000000000000000000",
+              "sha256": "448817e09e9b190cb3e15e818154c66446bbf0c5bfe7bd4524b5f10bf27f418d"
+            }
+          ]
+        }
+      ],
+      "prerequisites": []
+    },
+    {
+      "id": "lane-core",
+      "display_name": "Lane core fixture",
+      "status": "implemented",
+      "source": {
+        "repository": "https://github.com/example/pi-lane-fixtures.git",
+        "commit": "0000000000000000000000000000000000000000",
+        "subpath": "lane-core.mjs",
+        "hashes": [
+          {
+            "artifact": "lane-core.mjs",
+            "sha256": "4ee7f1368683c92e52dc5833fb713e2c07ce1e99dc1aa7567c9da6ac9cd0b01a"
+          },
+          {
+            "artifact": "README.md",
+            "sha256": "448817e09e9b190cb3e15e818154c66446bbf0c5bfe7bd4524b5f10bf27f418d"
+          }
+        ]
+      },
+      "compatibility": [
+        {
+          "pi_version": "0.85.1",
+          "state": "compatible",
+          "note": "Covered by the real AgentSession example test.",
+          "evidence": [
+            {
+              "kind": "repository-file",
+              "locator": "README.md",
+              "revision": "0000000000000000000000000000000000000000",
+              "sha256": "448817e09e9b190cb3e15e818154c66446bbf0c5bfe7bd4524b5f10bf27f418d"
+            }
+          ]
+        }
+      ],
+      "prerequisites": []
+    },
+    {
+      "id": "sol-pi",
+      "display_name": "SoL-Pi fixture",
+      "status": "experimental",
+      "source": {
+        "repository": "https://github.com/example/pi-lane-fixtures.git",
+        "commit": "0000000000000000000000000000000000000000",
+        "subpath": "sol-pi.mjs",
+        "hashes": [
+          {
+            "artifact": "sol-pi.mjs",
+            "sha256": "2ffe4d2bafe3d4f143a0a2262b80df3cfcd3d293c22d520db6132733418e517b"
+          },
+          {
+            "artifact": "README.md",
+            "sha256": "448817e09e9b190cb3e15e818154c66446bbf0c5bfe7bd4524b5f10bf27f418d"
+          }
+        ]
+      },
+      "compatibility": [
+        {
+          "pi_version": "0.85.1",
+          "state": "compatible",
+          "note": "Covered by the real AgentSession example test.",
+          "evidence": [
+            {
+              "kind": "repository-file",
+              "locator": "README.md",
+              "revision": "0000000000000000000000000000000000000000",
+              "sha256": "448817e09e9b190cb3e15e818154c66446bbf0c5bfe7bd4524b5f10bf27f418d"
+            }
+          ]
+        }
+      ],
+      "prerequisites": []
+    }
+  ]
+}
