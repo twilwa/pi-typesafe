@@ -5,7 +5,7 @@
 # does guarantee is that a run which did not actually judge your code says so.
 # A semantic run is evidence only about the functions it judged.
 #
-#   set -a; . ~/.config/typesafe/env; set +a
+#   set -a; . ./.env; set +a
 #   npm run lint:semantic
 #
 # Without a key the plugin reports its rules inactive and this script prints
@@ -23,7 +23,7 @@ if [ -z "${TYPESAFE_API_KEY:-}" ]; then
   banner
   echo "SKIPPED: semantic lint did not run — TYPESAFE_API_KEY is not set."
   echo "This is NOT a clean result. No function was judged."
-  echo "Load the key and re-run:  set -a; . ~/.config/typesafe/env; set +a"
+  echo "Set TYPESAFE_API_KEY or load it from a gitignored .env file, then re-run."
   banner
   exit 0
 fi

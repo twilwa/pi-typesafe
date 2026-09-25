@@ -334,7 +334,7 @@ from `npm run check`: the authoritative gate stays deterministic, offline and
 credential-free.
 
 ```sh
-set -a; . ~/.config/typesafe/env; set +a   # never commit the key
+set -a; . ./.env; set +a                   # never commit the key
 npm run lint:semantic
 npm run bench:jev                          # replay the 10-case seed benchmark
 ```
