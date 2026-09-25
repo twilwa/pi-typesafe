@@ -175,7 +175,7 @@ export function parseWorkerManifest(raw: unknown): WorkerManifest {
     runtime.harness !== "pi" ||
     bounds.owner !== "firstmate" ||
     selected.owner !== "worker" ||
-    integrity.validated_by !== "fm-worker-config-validator/v1"
+    integrity.validated_by !== "harness_lab/worker_config.py"
   )
     throw new Error("Invalid worker manifest authority");
 

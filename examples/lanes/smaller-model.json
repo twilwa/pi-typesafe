@@ -105,7 +105,7 @@
     "supersedes": null
   },
   "integrity": {
-    "validated_by": "fm-worker-config-validator/v1",
-    "self_sha256": "fdccbdafe1a5cbcb370c2a72c547837c7979ad444504e43c3794b8b402175264"
+    "validated_by": "harness_lab/worker_config.py",
+    "self_sha256": "6ac42a3dadae915c6ff708c662d6d9f9b665ef4cfcdbf9e03ffb269ef2874d6f"
   }
 }

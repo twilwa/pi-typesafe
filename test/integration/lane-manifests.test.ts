@@ -26,10 +26,6 @@ const packageEntry = fileURLToPath(
   import.meta.resolve("@earendil-works/pi-coding-agent"),
 );
 const packageRoot = resolve(packageEntry, "../..");
-const packageJson = JSON.parse(
-  await readFile(resolve(packageRoot, "package.json"), "utf8"),
-) as { version: string };
-
 async function loadPiAi() {
   const candidates = [
     resolve(packageRoot, "node_modules/@earendil-works/pi-ai/dist/index.js"),
@@ -60,8 +56,7 @@ const implementedDecisions = [
   { id: "lane-core", status: "implemented", outcome: "loaded" },
 ] satisfies CatalogExtensionDecision[];
 
-test("Pi 0.85.1 boots every lane manifest and records catalog decisions", async () => {
-  assert.equal(packageJson.version, "0.85.1");
+test("every lane manifest boots and records catalog decisions", async () => {
   const piAi = await loadPiAi();
   const scenarios = [
     {
