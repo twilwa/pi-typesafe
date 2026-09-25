@@ -151,7 +151,7 @@ function canonical(value: unknown): string {
     .join(",")}}`;
 }
 
-/** Match harness-lab's canonical digest, excluding the circular self-hash. */
+/** Match the worker-manifest canonical digest, excluding the circular self-hash. */
 export function manifestSha256(raw: Record<string, unknown>) {
   const copy = structuredClone(raw);
   if (record(copy.integrity)) delete copy.integrity.self_sha256;
@@ -175,7 +175,7 @@ export function parseWorkerManifest(raw: unknown): WorkerManifest {
     runtime.harness !== "pi" ||
     bounds.owner !== "firstmate" ||
     selected.owner !== "worker" ||
-    integrity.validated_by !== "harness_lab/worker_config.py"
+    integrity.validated_by !== "fm-worker-config-validator/v1"
   )
     throw new Error("Invalid worker manifest authority");
 

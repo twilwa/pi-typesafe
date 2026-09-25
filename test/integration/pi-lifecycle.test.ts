@@ -160,7 +160,7 @@ function workerManifest(receipts: string, catalogSha256: string) {
     },
     integrity: {
       self_sha256: "0".repeat(64),
-      validated_by: "harness_lab/worker_config.py",
+      validated_by: "fm-worker-config-validator/v1",
     },
   };
   value.integrity.self_sha256 = manifestSha256(value);

@@ -1,9 +1,9 @@
 # Lane manifest examples
 
-The files in [`examples/lanes`](../examples/lanes) turn the three pilot arms
-into worker configurations that Pi 0.85.1 can load today:
+The files in [`examples/lanes`](../examples/lanes) provide three example lanes
+as worker configurations that Pi 0.85.1 can load:
 
-| Arm           | Worker manifest      | Catalog config                      | Distinguishing choice                                     |
+| Lane          | Worker manifest      | Catalog config                      | Distinguishing choice                                     |
 | ------------- | -------------------- | ----------------------------------- | --------------------------------------------------------- |
 | Static        | `static.json`        | `static.catalog-config.json`        | SoL model, fixed local extensions                         |
 | Adaptive      | `adaptive.json`      | `adaptive.catalog-config.json`      | SoL model, plus an experimental SoL-Pi candidate          |
@@ -11,8 +11,8 @@ into worker configurations that Pi 0.85.1 can load today:
 
 Each worker manifest validates against the closed `fm-worker-config/v1`
 schema. Catalog settings live in a separate file because that schema rejects
-unknown fields. A future worker-config v2 can add a catalog reference, but
-harness-lab owns that schema change.
+unknown fields. A future worker-config v2 can add a catalog reference, but that requires a
+schema change.
 
 ## Run an example without network access
 
@@ -32,8 +32,8 @@ PI_EXTENSION_CATALOG_CONFIG="$catalog_config" \
 pi -e ./src/extension.ts
 ```
 
-Use `adaptive` or `smaller-model` in place of `static` for the other arms. The
-adaptive arm refuses `sol-pi` by default with
+Use `adaptive` or `smaller-model` in place of `static` for the other examples.
+The adaptive lane refuses `sol-pi` by default with
 `experimental-opt-in-required`. Pass the extension ID to the preparation
 script to opt in:
 
@@ -54,15 +54,15 @@ and the adaptive `sol-pi` decision as either `refused` with its reason or
 ## Worker manifest fields
 
 `identity` binds the file to one task and lane. Replace `brief_sha256` with the
-digest of the actual task brief when creating a real dispatch.
+digest of the task brief for each dispatch.
 
-`runtime` pins Pi 0.85.1 and records how Firstmate starts the worker. The
-catalog has an exact compatibility row for this version.
+`runtime` pins Pi 0.85.1 and records the worker launch settings. The catalog
+has an exact compatibility row for this version.
 
 `bounds` is the authority boundary. The model, tools, extensions, hooks, and
 Jev budgets are maximums, not suggestions. The adaptive example allows
 `sol-pi`; the other two do not. The static and smaller-model examples set the
-Jev selection budget to zero, as do the source pilot arms.
+Jev selection budget to zero, as in the corresponding source configurations.
 
 `selection` is the deterministic fallback and the initial runtime choice. All
 selected values must occur in their matching bound. Static and adaptive use
@@ -74,21 +74,20 @@ references.
 expected cache effect. These values come from the worker-config schema and are
 the same in all three examples.
 
-`rollback_target` identifies the configuration and worktree commit that a
-real pilot can restore. The example values are obvious placeholders. Replace
-both before dispatching production work.
+`rollback_target` identifies the configuration and worktree commit to restore
+for rollback. The example values are placeholders. Replace both before
+deploying the configuration.
 
 `receipts` is a normalized path relative to the worker's Git root.
-`provenance` records why Firstmate created the configuration. `integrity`
-contains the canonical self-hash and the harness-lab validator identity. Any
+`provenance` records why the example configuration was created. `integrity`
+contains the canonical self-hash and the worker-config validator identity. Any
 edit requires recalculating `integrity.self_sha256`.
 
-Run the harness-lab validator against the examples after changing them:
+Run the repository's offline checks after changing the manifests. They exercise
+all three examples through Pi's loader and validate their schema and integrity:
 
 ```sh
-python3 /path/to/harness-lab/harness_lab/worker_config.py examples/lanes/static.json
-python3 /path/to/harness-lab/harness_lab/worker_config.py examples/lanes/adaptive.json
-python3 /path/to/harness-lab/harness_lab/worker_config.py examples/lanes/smaller-model.json
+npm run check
 ```
 
 ## Catalog config fields

@@ -28,7 +28,11 @@
     ],
     "max_config_changes": 0,
     "max_change_diff_lines": 400,
-    "jev": { "max_calls": 0, "max_tokens": 0, "state_max_tokens": 0 }
+    "jev": {
+      "max_calls": 0,
+      "max_tokens": 0,
+      "state_max_tokens": 0
+    }
   },
   "selection": {
     "owner": "worker",
@@ -39,9 +43,18 @@
     "hooks": ["tool_call", "tool_result", "session_start", "session_shutdown"],
     "mcp": [],
     "tools_active": ["read", "bash", "edit", "write"],
-    "retrieval": { "mode": "none", "max_hits": 0 },
-    "context": { "policy": "cached-prefix", "compaction": "native" },
-    "sandbox": { "kind": "worktree", "template": null }
+    "retrieval": {
+      "mode": "none",
+      "max_hits": 0
+    },
+    "context": {
+      "policy": "cached-prefix",
+      "compaction": "native"
+    },
+    "sandbox": {
+      "kind": "worktree",
+      "template": null
+    }
   },
   "domains": {
     "model": {
@@ -92,7 +105,7 @@
     "supersedes": null
   },
   "integrity": {
-    "self_sha256": "6ac42a3dadae915c6ff708c662d6d9f9b665ef4cfcdbf9e03ffb269ef2874d6f",
-    "validated_by": "harness_lab/worker_config.py"
+    "validated_by": "fm-worker-config-validator/v1",
+    "self_sha256": "fdccbdafe1a5cbcb370c2a72c547837c7979ad444504e43c3794b8b402175264"
   }
 }

@@ -46,7 +46,7 @@ read when the extension loads; restart/reload it after changing configuration.
 
 Set `PI_WORKER_MANIFEST` to an absolute path or a path relative to Pi's working
 directory to enable startup selection. The file must use the
-`fm-worker-config/v1` fields from harness-lab and carry a valid canonical
+`fm-worker-config/v1` schema and carry a valid canonical
 `integrity.self_sha256`. The extension validates the identity, bounds, static
 selection, Jev budget, receipt path, and every field it consumes. An invalid
 manifest is ignored before any provider call or runtime change.
@@ -94,7 +94,7 @@ pi -e ./src/extension.ts
 Relative paths in `PI_EXTENSION_CATALOG_CONFIG` start at Pi's working
 directory. Relative `path` and `artifacts` values inside that file start at the
 file's directory. `sha256` uses sorted JSON keys and no insignificant
-whitespace, matching harness-lab's canonical catalog digest. `artifacts` maps
+whitespace, matching the canonical catalog digest. `artifacts` maps
 an allowed extension ID to an existing local Git checkout.
 `experimental_opt_in` is the explicit allowlist for entries whose status is
 `experimental`. Every ID in `artifacts` and `experimental_opt_in` must remain
