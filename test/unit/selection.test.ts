@@ -34,11 +34,11 @@ after(async () => {
   );
 });
 
-function manifest(receipts = "state/TES-160/receipts.jsonl") {
+function manifest(receipts = "state/task-1/receipts.jsonl") {
   const value = {
     schema_version: "fm-worker-config/v1",
     identity: {
-      task_id: "TES-160",
+      task_id: "task-1",
       lane: "pi-typesafe",
       brief_sha256: "b".repeat(64),
     },
@@ -366,7 +366,7 @@ test("receipt writing refuses a symlinked parent that leaves the Git root", asyn
       },
     ),
   );
-  await assert.rejects(access(resolve(outside, "TES-160/receipts.jsonl")));
+  await assert.rejects(access(resolve(outside, "task-1/receipts.jsonl")));
 });
 
 test("receipt writing refuses a symlinked receipt file", async () => {
@@ -384,7 +384,7 @@ test("receipt writing refuses a symlinked receipt file", async () => {
       manifest(),
       {
         prepare: async (root) => {
-          const directory = resolve(root, "state/TES-160");
+          const directory = resolve(root, "state/task-1");
           await mkdir(directory, { recursive: true });
           await symlink(target, resolve(directory, "receipts.jsonl"));
         },

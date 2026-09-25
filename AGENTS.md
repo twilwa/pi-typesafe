@@ -18,7 +18,8 @@ This file is the project's committed home for project-intrinsic agent knowledge:
 - `npm run lint:semantic` is an **optional** advisory check: `eslint-plugin-jev` asks the TypeSafe
   Jev model plain-English questions about each function, configured in `eslint.semantic.config.js`
   and never in `eslint.config.js`. It needs a key:
-  `set -a; . ~/.config/typesafe/env; set +a`. Never write the key into the repo, `.env`, or CI.
+  Set `TYPESAFE_API_KEY` in the environment or use a gitignored local `.env` file. Never commit
+  a real key or include one in CI.
 - **Missing key: the rules report themselves inactive and nothing is judged.** That is a _skipped_
   result, never a clean one; `scripts/lint-semantic.sh` prints a SKIPPED banner and
   `test/unit/jev-lint.test.ts` holds it to that. Functions skipped for the per-file deadline or a

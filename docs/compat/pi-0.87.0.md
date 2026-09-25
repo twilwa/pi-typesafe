@@ -42,11 +42,10 @@ The asserted version difference is exact:
 - Pi 0.87.0 leaves `ctx.isIdle()` true at that point and starts the continuation
   only after all `agent_settled` handlers return.
 
-This is the same deferral observed in
-`/home/firstmate/firstmate/data/hl-solpi-deployment-check/report.md`. That report
-found SoL-Pi waiting inside `agent_settled` for work that 0.87.0 cannot start
-until the handler returns. Pi-typesafe is not exposed to that cycle: it
-registers no `agent_settled` handler, its awaited startup work runs in
+This is the Pi 0.87.0 deferral: a continuation requested by an
+`agent_settled` handler starts only after all such handlers return. A handler
+that waits for that continuation can therefore wait indefinitely. Pi-typesafe is not exposed to that cycle: it registers no `agent_settled`
+handler, its awaited startup work runs in
 `session_start`, and its awaited tool work runs within the tool lifecycle. The
 test's asynchronous settled co-handler deliberately returns without awaiting
 the child continuation, proving pi-typesafe completes and the session drains on

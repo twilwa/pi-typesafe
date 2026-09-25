@@ -1,9 +1,10 @@
 # Package review: `@shahriarbijoy/eslint-plugin-jev@0.3.0`
 
-**Status: not blocked.** Every requirement in the lane brief is satisfiable with this
-implementation. Two behaviours need explicit configuration to be safe (`provider`, `strict`) and one
-gap cannot be closed by configuration at all (per-unit skips, §7). None of them contradicts a
-requirement outright, so this review proceeds to adoption rather than stopping.
+## Summary
+
+The plugin can be used with this package. Two behaviours need explicit configuration (`provider`,
+`strict`), and one gap cannot be closed by configuration (per-unit skips, §7). These limitations
+make an advisory-only integration appropriate.
 
 Reviewed by reading the published tarball, not the repository:
 
@@ -15,8 +16,9 @@ sha512-X3USBmLcDrldcza1mRu3Spkj2ZN52tHn1I8hiZKbhxlLtJWdUtKVvKdhHXmXtK3plBm/CLzmN
 The recomputed SHA-512 matches the integrity the registry advertises. Shipped files are
 `dist/index.js`, `dist/worker.js`, their maps, `dist/index.d.ts`, `README.md`, `LICENSE` (MIT).
 There are **no install lifecycle scripts**; the package was installed with `--ignore-scripts`
-regardless. Runtime dependencies are `@typesafe-ai/sdk ^0.6.0` (this repo already pins 0.6.0
-exactly) and `synckit ^0.11.13`. Peer range is `eslint ^9 || ^10`; this repo is on 10.10.0.
+regardless. Runtime dependencies are `@typesafe-ai/sdk ^0.6.0` (this package pins 0.6.0
+exactly) and `synckit ^0.11.13`. Peer range is `eslint ^9 || ^10`; this configuration uses
+ESLint 10.10.0.
 
 Line references below are to the unpacked `dist/` bundles.
 
@@ -82,22 +84,20 @@ if (tsKey) return { backend: "typesafe", apiKey: tsKey };
 if (orKey) return { backend: "openrouter", apiKey: orKey };
 ```
 
-That would send this repository's source to `https://openrouter.ai/api/alpha/decisions` — a third
-party, on a beta endpoint — without any diagnostic saying the backend changed. The lane brief's
-"explicit TypeSafe provider" requirement is exactly the mitigation: `provider: "typesafe"` pins the
-backend regardless of which keys happen to be in the environment, and makes a missing TypeSafe key
-an error rather than a silent reroute. **`provider` must never be left at `auto` in this repo.**
+That can send source code to `https://openrouter.ai/api/alpha/decisions` — a third party, on a beta
+endpoint — without any diagnostic saying the backend changed. Setting `provider: "typesafe"` pins
+the backend regardless of which keys happen to be in the environment, and makes a missing TypeSafe
+key an error rather than a silent reroute. For a TypeSafe-based setup, set the provider explicitly
+instead of leaving it at `auto`.
 
 ## 3. API key resolution
 
 `resolveApiKey(cwd)` checks, in order: `process.env.TYPESAFE_API_KEY`, then a `.env` file in the
 ESLint cwd parsed by the plugin's own reader, then `~/.config/jev/config.json` (`{"apiKey": …}`).
 
-Two notes. First, the plugin will read a repo-local `.env` on its own — so `.env*` staying
-git-ignored matters for more than tidiness. This repo's `.gitignore` already covers `.env` and
-`.env.*`. Second, our key lives at `~/.config/typesafe/env`, which the plugin does **not** read; it
-must be exported into the environment of the process that runs ESLint. No key is written into the
-repo, a `.env`, CI, or any output.
+The plugin reads a working-directory `.env` file on its own, so local `.env` files should be
+git-ignored. It also accepts `TYPESAFE_API_KEY` from the ESLint process environment. Never commit
+a real key or include one in CI output.
 
 ## 4. Threshold semantics — "yes" means violation
 
@@ -112,7 +112,7 @@ _true_ is the defect, and each rule reports only when the probability meets the 
 
 The custom `check` rule enforces the same convention by documentation only: the question text is
 passed through verbatim and reported when the answer is yes, so a question phrased so that "yes"
-means _good_ silently inverts. Our per-repo questions must be worded as defects.
+means _good_ silently inverts. Write custom questions so that "yes" indicates a defect.
 
 Thresholds are schema-bounded to `[0.5, 1]`. The reported message always carries the probability
 and the threshold it was judged against, which is what makes the output auditable.
@@ -125,7 +125,7 @@ human selects the quick fix in an editor. **`eslint --fix` cannot rename anythin
 satisfies the "no autofix renames" requirement out of the box — no configuration needed.
 
 Residual, worth knowing: an editor quick-fix _will_ rename on an explicit click, and it rewrites the
-declaration identifier only, not call sites. The scoped instructions say so.
+declaration identifier only, not call sites. Document this behavior for anyone applying suggestions.
 
 ## 6. Concurrency, timeout, cache, model
 
@@ -138,15 +138,15 @@ declaration identifier only, not call sites. The scoped instructions say so.
 | `model`             | `jev-latest`                            | an alias — see below                                                                           |
 
 The per-file deadline is the setting most likely to surprise: a file with many uncached functions
-can exhaust the budget and skip its tail (§7). The pilot config raises it accordingly.
+can exhaust the budget and skip its tail (§7). The evaluation config raises it accordingly.
 
 Cache key is `sha256(backend, model, questionText, stateText)`. Because `stateText` is the full
 serialized state, any edit to a function refetches only that function. The cache stores the answer,
 the resolved model id and a timestamp — **not** the source. Switching `provider` or `model`
 invalidates by design.
 
-`model: "jev-latest"` is an alias, and cached answers survive the alias moving. The brief requires
-pinning the validated model id; the resolved id is available because the worker records
+`model: "jev-latest"` is an alias, and cached answers survive the alias moving. For reproducible
+results, pin the validated model id; the resolved id is available because the worker records
 `res.model = out.model` from the response. The benchmark run resolved it and the pinned value is
 recorded in `pilot-2026-09-21.md` and set in `eslint.semantic.config.js`.
 
@@ -179,7 +179,7 @@ request-stage one. The package README states this limitation plainly, and the co
 
 **Mitigation adopted.** Configuration cannot close this, so the wrapper carries it: `npm run
 lint:semantic` runs through `scripts/lint-semantic.sh`, which refuses to report success on a run it
-cannot vouch for, and the scoped instructions state that a semantic run is evidence only about the
+cannot vouch for, and the documentation states that a semantic run is evidence only about the
 functions it actually judged. The honest framing throughout is _skipped_, never _clean_.
 
 ## 8. Other observations
@@ -189,8 +189,8 @@ functions it actually judged. The honest framing throughout is _skipped_, never 
   stated reasoning that the consumer picks those names, not the body's author.
 - `comment-matches-code` skips pragma comments (`eslint-*`, `@ts-*`, licence headers, etc.).
 - The bundled `configs.recommended` turns all four rules on at `warn` and disables
-  `helpful-error-message` in test files. This repo does **not** extend it — rules are listed
-  explicitly so thresholds and scope stay visible in review.
+  `helpful-error-message` in test files. This configuration does **not** extend it — rules are
+  listed explicitly so thresholds and scope stay visible in review.
 - `JEV_FAKE_ANSWERS` / `JEV_FAKE_ERRORS` short-circuit the worker with scripted answers from a JSON
   file. That is the supported offline seam, and the offline tests use it — no key, no network.
 - `synckit` runs the worker synchronously via a worker thread with `timeout: timeoutMs + 2000`.

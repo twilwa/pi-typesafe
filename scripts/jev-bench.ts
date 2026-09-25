@@ -6,12 +6,12 @@
  * and prints the resolved model id, which is the id pinned in
  * `eslint.semantic.config.js`.
  *
- * Usage: set -a; . ~/.config/typesafe/env; set +a
+ * Usage: set -a; . ./.env; set +a
  *        node scripts/jev-bench.ts [labels.jsonl]
  *
  * Defaults to the 10-case seed benchmark. Pass
  * `test/fixtures/jev-lint/observed-exceptions.jsonl` to re-check the
- * true negatives observed in this repository against a threshold change.
+ * true-negative fixtures against a threshold change.
  */
 import { readFileSync } from "node:fs";
 import { TypeSafeClient, type JsonValue } from "@typesafe-ai/sdk";
