@@ -1,8 +1,8 @@
 # pi-typesafe
 
-A Jev coding sidecar for Pi, plus an optional bounded startup selector. The
-sidecar runs four pre-flight hazard checks before `bash`, `write`, and `edit`,
-and four diff-quality checks after successful `write` and `edit`. Questions
+A TypeSafe Jev coding-assist sidecar for Pi. It runs four pre-flight hazard
+checks before `bash`, `write`, and `edit`, and four diff-quality checks after
+successful `write` and `edit`. Questions
 share one TypeSafe System One request per phase. Jev returns typed values; this
 extension applies thresholds and writes fixed feedback text.
 
@@ -26,8 +26,8 @@ npm run check
 pi -e ./src/extension.ts
 ```
 
-With no key and no worker manifest, the extension loads and does nothing. To
-enable evaluation, export `TYPESAFE_API_KEY` in Pi's environment, or copy
+With no key, the extension loads and leaves tool calls untouched. To enable
+evaluation, export `TYPESAFE_API_KEY` in Pi's environment, or copy
 `.env.example` to `.env`, enter the key locally, and load it before starting Pi:
 
 ```sh
@@ -41,119 +41,6 @@ Pi does not automatically load this repository's `.env`. Local `.env` files are
 ignored by git; never commit credentials. The extension creates the existing
 `src/typesafe.ts` client only when a nonblank key is configured. Configuration is
 read when the extension loads; restart/reload it after changing configuration.
-
-## Startup worker selection
-
-Set `PI_WORKER_MANIFEST` to an absolute path or a path relative to Pi's working
-directory to enable startup selection. The file must use the
-`fm-worker-config/v1` schema and carry a valid canonical
-`integrity.self_sha256`. The extension validates the identity, bounds, static
-selection, Jev budget, receipt path, and every field it consumes. An invalid
-manifest is ignored before any provider call or runtime change.
-
-At `session_start`, one bounded request selects model, effort, skills,
-extensions, hooks, MCP servers, retrieval mode, and sandbox kind. Each candidate
-comes from the manifest. Code rejects values outside those lists and accepts a
-decision only at confidence 0.80 or higher. Static skills remain a floor, so the
-provider may add an allowed skill but cannot remove a deterministic selection.
-`pi-typesafe` also remains selected when writes are allowed and the extension is
-within bounds.
-
-Pi directly applies the selected model and effort with `setModel()` and
-`setThinkingLevel()`. It applies the manifest's static `tools_active` list with
-`setActiveTools()`. The other decisions stay bounded, recorded inputs for the
-owner-controlled resource reload path. MCP names remain recorded decisions; this
-module does not load an MCP schema.
-
-### Catalog-backed extensions
-
-Keep the worker manifest valid under the closed `fm-worker-config/v1` schema.
-Put catalog loading in a separate `pi-extension-catalog-config/v1` file, then
-set `PI_EXTENSION_CATALOG_CONFIG` to that file before Pi starts:
-
-```json
-{
-  "schema_version": "pi-extension-catalog-config/v1",
-  "catalog": {
-    "path": "config/extension-catalog.json",
-    "sha256": "<canonical catalog SHA-256>",
-    "artifacts": {
-      "my-extension": "/opt/pi-extensions/my-extension"
-    },
-    "experimental_opt_in": ["my-experimental-extension"]
-  }
-}
-```
-
-```sh
-PI_WORKER_MANIFEST=config/worker.json \
-PI_EXTENSION_CATALOG_CONFIG=config/pi-extension-catalog.json \
-pi -e ./src/extension.ts
-```
-
-Relative paths in `PI_EXTENSION_CATALOG_CONFIG` start at Pi's working
-directory. Relative `path` and `artifacts` values inside that file start at the
-file's directory. `sha256` uses sorted JSON keys and no insignificant
-whitespace, matching the canonical catalog digest. `artifacts` maps
-an allowed extension ID to an existing local Git checkout.
-`experimental_opt_in` is the explicit allowlist for entries whose status is
-`experimental`. Every ID in `artifacts` and `experimental_opt_in` must remain
-inside `bounds.extensions_allowed`.
-
-The loader still accepts the older additive `extension_catalog` worker-manifest
-field when present. New manifests should use the separate file because the v1
-worker schema is closed and does not define that field. See
-[`docs/lane-manifests.md`](docs/lane-manifests.md) for runnable static,
-adaptive, and smaller-model examples.
-
-The loader never downloads or installs an extension. It checks the checkout's
-`origin` URL, exact `HEAD`, and clean status against the catalog source, then
-streams and verifies every listed artifact hash. A file-valued `source.subpath`
-is the extension entry point. For a directory-valued subpath, the loader reads
-the checkout's `package.json` and loads only `pi.extensions` entries inside that
-directory. Every imported entry point must have its own `source.hashes` record.
-For a multi-entry package, the loader stages every factory and commits its Pi
-registrations only after all factories return successfully.
-
-An entry loads only when its status is `implemented`, or when it is
-`experimental` and opted in. The exact `runtime.version` also needs a
-`compatible` catalog row, and every prerequisite must be `satisfied`.
-`proposed` entries never load. A bad catalog digest or shape refuses every
-selected ID. Source, hash, status, compatibility, prerequisite, entry-point,
-and import failures are all fail-closed for that extension and do not prevent
-the Pi session from starting.
-
-If the provider is unavailable, errors, times out, exceeds the manifest token
-budget, returns low confidence, or proposes a disallowed value, the affected
-axis uses the manifest's static selection. Model or effort application failure
-also retries the static value. Missing credentials therefore still produce a
-useful static startup and an abstention receipt; they do not leave the runtime in
-a half-selected state. `bounds.jev.max_calls` is cumulative for each task while
-the extension instance remains loaded, so session resumes do not reset it.
-
-The extension resolves `receipts` from the Git root and appends one JSON object
-per line. It refuses a receipt file or parent directory that is a symbolic link.
-Each line contains:
-
-- the selected values, confidence, source, and whether Pi applied the value at
-  runtime;
-- abstention reason codes and the canonical manifest SHA-256;
-- provider attempt status, request SHA-256, returned model, request ID, token
-  usage, and latency.
-- when `extension_catalog` is present, its verified SHA-256 and one ordered
-  load decision per selected extension ID. Refusals use stable reason codes such
-  as `hash-mismatch`, `status-proposed`, `unsupported-pi-version`,
-  `experimental-opt-in-required`, `entrypoint-unhashed`, and
-  `prerequisite-unmet`.
-
-Receipts never contain the brief, provider state, question wording, raw response,
-or error text. The request does contain the latest user brief, the static profile,
-and allowed candidate names. Treat it like the sidecar's existing provider data:
-only configure a key for tasks approved for that endpoint.
-
-The unit suite injects a faux provider for selection, including select, abstain,
-failure, disallowed-value, and receipt-shape cases. `npm run check` remains fully
-offline and never needs a TypeSafe key.
 
 For a real-session trial, use a disposable Git repository, set `sidecar` to this
 checkout's absolute path, and launch:
@@ -389,7 +276,7 @@ npm run lint:semantic     # optional advisory semantic lint; needs a key
 ```
 
 `npm run check` passes offline without a key; the existing live SDK test skips
-when its key is absent. No existing test was weakened. Unit coverage includes
+when its key is absent. Sidecar unit coverage includes
 blocking/confidence boundaries, batched question shapes, all three modes,
 content preservation, failures, malformed fields, missing keys, cancellation,
 non-cooperative transport timeouts, Git-child reaping, response-size boundaries,
