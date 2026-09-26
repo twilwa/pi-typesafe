@@ -3,7 +3,8 @@
 Tested on 2026-09-22 with Node.js 24.21.0 and
 `@earendil-works/pi-coding-agent` 0.87.0. Pi 0.87.0 was installed only in an
 isolated scratch prefix. The repository's pinned 0.85.1 installation remained
-unchanged.
+unchanged. The recorded 60-test result below describes that revision; the
+current suite no longer includes the startup configuration tests.
 
 ## Result
 
@@ -28,8 +29,8 @@ updates a host-global Pi.
 The matrix includes a real `AgentSession` test, not only an extension-loader
 test. It loads pi-typesafe and an asynchronous lifecycle observer, runs an
 offline faux-model turn through a custom tool, and therefore exercises
-pi-typesafe's `session_start`, `tool_call`, and `tool_result` handlers. Startup
-selection must write its receipt and apply the selected model before the turn.
+pi-typesafe's `session_start`, `tool_call`, and `tool_result` handlers. The
+current `session_start` handler resets the sidecar without selecting a model.
 At the first `agent_settled` boundary, the observer requests one continuation,
 waits briefly, and returns; the continuation must complete and the session must
 be idle after three model calls and one tool execution.
@@ -44,10 +45,10 @@ The asserted version difference is exact:
 
 This is the Pi 0.87.0 deferral: a continuation requested by an
 `agent_settled` handler starts only after all such handlers return. A handler
-that waits for that continuation can therefore wait indefinitely. Pi-typesafe is not exposed to that cycle: it registers no `agent_settled`
-handler, its awaited startup work runs in
-`session_start`, and its awaited tool work runs within the tool lifecycle. The
-test's asynchronous settled co-handler deliberately returns without awaiting
+that waits for that continuation can therefore wait indefinitely. Pi-typesafe
+registers no `agent_settled` handler. Its session reset runs in `session_start`,
+and its awaited tool work runs within the tool lifecycle. The test's
+asynchronous settled co-handler deliberately returns without awaiting
 the child continuation, proving pi-typesafe completes and the session drains on
 both supported versions. No runtime hook fix was needed.
 
